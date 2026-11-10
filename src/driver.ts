@@ -162,6 +162,7 @@ function spawnWorkerRound(cwd: string, dir: string, m: Manifest, round: number, 
 		foreground: false,
 	});
 	const child = spawnHead(argv, { ...process.env, NIGHTWATCH_TASK_DIR: dir, NIGHTWATCH_ROUND: String(round) }, workerEventsPath(dir, round), roundErrPath(dir, round, "worker"), true, cwd);
+	if (child.pid === undefined) throw new WatchSpawnError("worker head failed to spawn (check worker.err)");
 	const headStart = psLstart(child.pid);
 	if (headStart === "") {
 		// Never record an unmatchable identity — stop now rather than mis-kill later.

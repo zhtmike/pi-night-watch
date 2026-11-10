@@ -24,4 +24,4 @@ docs/design.md is the design authority; docs/api.md is the surface reference. Ke
 - pi flag drift is the standing compat hazard (children ride `--mode json --no-session --approve -e …`); after any pi upgrade, check `pi --help` against the argv builder in `driver.ts`.
 - Comments carry their own invariants — no file cites a design document; no file narrates its own history.
 - WHY-comments only, two lines max. The manifest is the only stored state.
-- Release: tag-driven; tag == package.json version == a CHANGELOG section.
+- CI: tests on push/PR (node 22.19.0 floor + 24); typecheck against `pi-coding-agent@1.4.0` with a `@latest` canary; releases are tag-driven — tag == package.json version == a CHANGELOG `## <version> — <title>` section, then OIDC provenance publish + GitHub release.

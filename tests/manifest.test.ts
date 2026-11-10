@@ -1,18 +1,17 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { WatchError, readManifest, readVerdicts, writeManifest } from "../src/manifest.ts";
+import { WatchError, readManifest, readVerdicts, writeManifest, type Manifest } from "../src/manifest.ts";
 import { check, finish } from "./harness.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nw-manifest-"));
 const file = path.join(tmp, "a", "manifest.json");
-const m = {
-	version: 1 as const,
+const m: Manifest = {
+	version: 1,
 	slug: "t",
 	goal: "g",
 	reviewRubric: null,
 	config: { piBin: "pi", timeoutBin: "timeout", maxRounds: 2, roundDeadlineMin: 3, reviewerDeadlineMin: 4, killGraceSec: 5, criteriaTimeoutMs: 6, lockGraceMs: 7, preflightTimeoutMs: 8 },
-	reviewRubric: null,
 	criteriaFiles: [],
 	criteriaHash: "",
 	owner: { host: "h", startedAt: "t" },

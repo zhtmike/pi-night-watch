@@ -20,6 +20,7 @@ const text = (s: string): AgentToolResult => ({ content: [{ type: "text", text: 
 
 const submitVerdictTool = defineTool({
 	name: "submit_verdict",
+	label: "Submit verdict",
 	description: "Submit the review verdict. Call exactly once, as your final act. passed: whether the goal is met; notes: what you verified and what remains (≤500 chars); evidence: commands you ran and what they showed.",
 	parameters: Type.Object({
 		passed: Type.Boolean({ description: "True only if the goal is verifiably met" }),
@@ -35,6 +36,7 @@ const submitVerdictTool = defineTool({
 
 const reviewGateTool = defineTool({
 	name: "review_gate",
+	label: "Review gate",
 	description:
 		"Send the current state to an independent fresh-context reviewer and get its verdict. Call this when you believe the goal is met — never claim completion without it. Takes no arguments; the reviewer sees the goal, criteria, and prior findings itself.",
 	parameters: Type.Object({}),
@@ -70,7 +72,7 @@ export default function (pi: ExtensionAPI) {
 		getArgumentCompletions: (arg: string) => {
 			const first = (arg.split(/\s+/)[0] ?? "").trim();
 			if (!arg.includes(" ")) {
-				return ["start ", "status ", "advance ", "stop "].filter((s) => first === "" || s.startsWith(first)).map((value) => ({ value, description: value.trim() }));
+				return ["start ", "status ", "advance ", "stop "].filter((s) => first === "" || s.startsWith(first)).map((value) => ({ label: value.trim(), value, description: value.trim() }));
 			}
 			return null;
 		},
@@ -82,7 +84,7 @@ export default function (pi: ExtensionAPI) {
 				if (cmd === "start") {
 					const o = parseStartArgs(args.slice("start".length));
 					if (!o.goal) {
-						ctx.ui.notify(USAGE, "warn");
+						ctx.ui.notify(USAGE, "warning");
 						return;
 					}
 					const { slug } = startTask(ctx.cwd, o.goal, { criteriaFiles: o.criteriaFiles, slug: o.slug, criteria: o.criteria, reviewRubric: o.reviewRubric });
@@ -99,7 +101,7 @@ export default function (pi: ExtensionAPI) {
 					const lines = await stopTask(ctx.cwd, slugArg ?? latestSlug(ctx.cwd));
 					ctx.ui.notify(lines.join("\n"), "info");
 				} else {
-					ctx.ui.notify(USAGE, "warn");
+					ctx.ui.notify(USAGE, "warning");
 				}
 			} catch (err) {
 				ctx.ui.notify(`night-watch error: ${(err as Error).message}`, "error");

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0
+## 0.1.0 — core loop
 
 Initial release. Worker/reviewer loop: full-capability headless pi
 rounds, fresh-context reviewer verdicts parsed as schema-validated tool calls from
