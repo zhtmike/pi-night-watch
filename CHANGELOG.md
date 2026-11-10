@@ -2,7 +2,7 @@
 
 ## 0.1.0
 
-Initial release. Worker/reviewer loop with file state: full-capability headless pi
+Initial release. Worker/reviewer loop: full-capability headless pi
 rounds, fresh-context reviewer verdicts parsed as schema-validated tool calls from
 event streams (one repair retry), driver-run criteria as a PASS precondition,
 criteria-file tamper guard, crash recovery by stateless re-derivation (write-ahead,

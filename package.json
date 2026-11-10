@@ -1,7 +1,7 @@
 {
 	"name": "@zhtmike/pi-night-watch",
 	"version": "0.1.0",
-	"description": "Long-horizon worker/reviewer loop for the pi coding agent — file state, stateless advance, no daemon; zero runtime dependencies",
+	"description": "Long-horizon worker/reviewer loop for the pi coding agent",
 	"author": "zhtmike",
 	"keywords": [
 		"pi-package",

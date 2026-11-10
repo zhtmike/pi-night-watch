@@ -1,6 +1,6 @@
 # pi-night-watch
 
-Long-horizon worker/reviewer loop with **file state** for the
+Long-horizon worker/reviewer loop for the
 [pi coding agent](https://pi.dev).
 
 A **watch** is a task that outlives your session. Worker rounds are
