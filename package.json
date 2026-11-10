@@ -1,0 +1,34 @@
+{
+	"name": "@zhtmike/pi-night-watch",
+	"version": "0.1.0",
+	"description": "Long-horizon worker/reviewer loop for the pi coding agent — file state, stateless advance, no daemon; zero runtime dependencies",
+	"author": "zhtmike",
+	"keywords": [
+		"pi-package",
+		"pi",
+		"agent",
+		"loop",
+		"review"
+	],
+	"license": "MIT",
+	"type": "module",
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"test": "node tests/config.test.ts && node tests/layout.test.ts && node tests/manifest.test.ts && node tests/decision.test.ts && node tests/briefs.test.ts && node tests/argv.test.ts && node tests/events.test.ts && node tests/args.test.ts && node tests/driver.test.ts"
+	},
+	"files": [
+		"src",
+		"docs",
+		"CHANGELOG.md"
+	],
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	}
+}
