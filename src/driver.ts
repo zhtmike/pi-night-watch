@@ -16,7 +16,7 @@ import * as path from "node:path";
 import { parseStartArgs } from "./args.ts";
 import type { StartOpts } from "./args.ts";
 import { type WatchConfig, normalizeConfig } from "./config.ts";
-import { crashOutcome, decideOutcome, roundWaitState, sha256, terminalFromOutcomes, waitRetryDelayMs } from "./decision.ts";
+import { crashOutcome, decideOutcome, lastVerdictFor, roundWaitState, sha256, terminalFromOutcomes, waitRetryDelayMs } from "./decision.ts";
 import { reviewerBrief, workerBrief, decisionBrief } from "./briefs.ts";
 import { parseEvents, validateVerdictArgs, validateConsultArgs, validateDecisionArgs, type ConsultAsk } from "./events.ts";
 import {
@@ -240,18 +240,13 @@ export async function runReviewGate(dir: string, round: number, extPath: string)
 			foreground: true,
 		});
 		const outFile = reviewerEventsPath(dir, round, k, attempt); // one stream per attempt: a torn tail stays a tail
-		await new Promise<void>((resolve) => {
-			const child = spawnHead(
-				argv,
-				{ ...process.env, NIGHTWATCH_TASK_DIR: dir, NIGHTWATCH_ROUND: String(round), NIGHTWATCH_REVIEWER: "1" },
-				outFile,
-				roundErrPath(dir, round, `review-${k}-${attempt}`),
-				false, // --foreground keeps the reviewer inside the worker's process group
-				process.cwd(), // the worker's cwd is the task workspace
-			);
-			child.on("exit", () => resolve());
-			child.on("error", () => resolve());
-		});
+		await awaitGatedChild(
+			argv,
+			{ ...process.env, NIGHTWATCH_TASK_DIR: dir, NIGHTWATCH_ROUND: String(round), NIGHTWATCH_REVIEWER: "1" },
+			outFile,
+			roundErrPath(dir, round, `review-${k}-${attempt}`),
+			process.cwd(), // the worker's cwd is the task workspace
+		);
 		const calls = parseEvents(fs.readFileSync(outFile, "utf-8")).verdictCalls;
 		const call = calls[calls.length - 1];
 		if (call) {
@@ -264,6 +259,15 @@ export async function runReviewGate(dir: string, round: number, extPath: string)
 	}
 	appendVerdict(verdictsPath(dir), verdict);
 	return verdict;
+}
+
+/** Spawn a gated child (--foreground, inside the worker's group) and await its exit; one stream per attempt. */
+function awaitGatedChild(argv: string[], env: NodeJS.ProcessEnv, outFile: string, errFile: string, cwd: string): Promise<void> {
+	return new Promise<void>((resolve) => {
+		const child = spawnHead(argv, env, outFile, errFile, false, cwd);
+		child.on("exit", () => resolve());
+		child.on("error", () => resolve());
+	});
 }
 
 /** Spawn a decision-mode reviewer for the worker's question, parse its submit_decision call, append it. */
@@ -288,18 +292,13 @@ export async function runConsultation(dir: string, round: number, ask: ConsultAs
 			foreground: true,
 		});
 		const outFile = decisionEventsPath(dir, round, k, attempt);
-		await new Promise<void>((resolve) => {
-			const child = spawnHead(
-				argv,
-				{ ...process.env, NIGHTWATCH_TASK_DIR: dir, NIGHTWATCH_ROUND: String(round), NIGHTWATCH_DECIDER: "1" },
-				outFile,
-				roundErrPath(dir, round, `decision-${k}-${attempt}`),
-				false, // --foreground keeps the decider inside the worker's process group
-				process.cwd(),
-			);
-			child.on("exit", () => resolve());
-			child.on("error", () => resolve());
-		});
+		await awaitGatedChild(
+			argv,
+			{ ...process.env, NIGHTWATCH_TASK_DIR: dir, NIGHTWATCH_ROUND: String(round), NIGHTWATCH_DECIDER: "1" },
+			outFile,
+			roundErrPath(dir, round, `decision-${k}-${attempt}`),
+			process.cwd(),
+		);
 		const calls = parseEvents(fs.readFileSync(outFile, "utf-8")).decisionCalls;
 		const call = calls[calls.length - 1];
 		if (call) {
@@ -322,27 +321,24 @@ export async function runConsultation(dir: string, round: number, ask: ConsultAs
 
 // --- criteria / hashes -------------------------------------------------------------------------
 
-/** Lines of shell-command output kept for notes. */
+/** Lines of shell-command output kept for failure notes. */
 const CRITERIA_TAIL_LINES = 5;
 
-function runShell(cwd: string, cmd: string, timeoutMs: number): { exit: number | null; tail: string } {
-	const r = spawnSync("bash", ["-c", cmd], { cwd, encoding: "utf-8", timeout: timeoutMs });
+/** Driver-side shell under the timeout leash: plain `timeout` runs the command in its own group, so a timeout kills the whole process tree, not just bash. The node backstop sits past timeout's own TERM→KILL schedule so the group kill lands first. */
+export function runShell(cwd: string, cmd: string, cfg: WatchConfig, env: NodeJS.ProcessEnv = process.env): { exit: number | null; tail: string } {
+	const secs = Math.max(1, Math.ceil(cfg.criteriaTimeoutMs / 1000));
+	const r = spawnSync(cfg.timeoutBin, ["-k", String(cfg.killGraceSec), String(secs), "bash", "-c", cmd], { cwd, encoding: "utf-8", env, timeout: secs * 1000 + cfg.killGraceSec * 1000 + 2_000 });
 	if (r.error) return { exit: null, tail: `spawn error: ${r.error.message}` };
 	const out = `${r.stdout ?? ""}${r.stderr ?? ""}`.trimEnd();
 	return { exit: r.status, tail: out.split("\n").slice(-CRITERIA_TAIL_LINES).join("\n") };
 }
 
-export function runCriteria(cwd: string, cfg: WatchConfig): { exit: number | null; tail: string } {
+function runCriteria(cwd: string, cfg: WatchConfig): { exit: number | null; tail: string } {
 	if (!cfg.criteria) return { exit: null, tail: "" };
-	return runShell(cwd, cfg.criteria, cfg.criteriaTimeoutMs);
+	return runShell(cwd, cfg.criteria, cfg);
 }
 
-/** Driver-side wait check; a null exit (spawn error/timeout) counts as a failed check. */
-export function runWaitCheck(cwd: string, checkCmd: string, cfg: WatchConfig): { exit: number | null; tail: string } {
-	return runShell(cwd, checkCmd, cfg.criteriaTimeoutMs);
-}
-
-export function hashCriteriaFiles(cwd: string, files: string[]): string {
+function hashCriteriaFiles(cwd: string, files: string[]): string {
 	const parts = files.map((f) => `${f}:${sha256(fs.readFileSync(path.join(cwd, f), "utf-8"))}`);
 	return sha256(parts.join("|"));
 }
@@ -407,8 +403,15 @@ export interface AdvanceReport {
  */
 export function advanceTask(cwd: string, slug: string, extPath: string): AdvanceReport {
 	const dir = taskDir(cwd, slug);
-	const m = readManifest(manifestPath(dir));
-	const release = acquireLock(dir, m.config);
+	const lockCfg = readManifest(manifestPath(dir)).config; // pre-lock read is for the claim only; state is re-read under the lock
+	const release = acquireLock(dir, lockCfg);
+	let m: Manifest;
+	try {
+		m = readManifest(manifestPath(dir));
+	} catch (err) {
+		release();
+		throw err;
+	}
 	try {
 		if (m.terminal) return { slug, lines: [`terminal: ${m.terminal.state} — ${m.terminal.note}`] };
 		if (m.owner.host !== hostname()) throw new WatchError(`task owned by ${m.owner.host}: fail-closed, hand-delete to retry elsewhere`);
@@ -427,7 +430,7 @@ export function advanceTask(cwd: string, slug: string, extPath: string): Advance
 				continue;
 			}
 			const verdicts = readVerdicts(verdictsPath(dir));
-			const verdict = [...verdicts].reverse().find((v) => v.round === r.id) ?? null;
+			const verdict = lastVerdictFor(verdicts, r.id);
 			// A last-verdict wait parks the round — it never takes the normal decide path while parked.
 			const wait = roundWaitState(r, verdict);
 			if (wait !== null) {
@@ -441,7 +444,7 @@ export function advanceTask(cwd: string, slug: string, extPath: string): Advance
 					writeManifest(manifestPath(dir), m);
 					continue;
 				}
-				const check = runWaitCheck(cwd, wait.check_cmd, m.config);
+				const check = runShell(cwd, wait.check_cmd, m.config);
 				if (check.exit === 0) {
 					// The wait was a conditional attestation: check exit 0 + criteria (if any) green decides the round PASS outright.
 					const criteriaRun = m.config.criteria ? runCriteria(cwd, m.config) : { exit: null as number | null, tail: "" };
@@ -474,6 +477,7 @@ export function advanceTask(cwd: string, slug: string, extPath: string): Advance
 				verdict,
 				criteriaConfigured: Boolean(m.config.criteria),
 				criteriaExit: criteriaRun.exit,
+				criteriaTail: criteriaRun.tail,
 			});
 			r.outcome = decision ?? { what: "FAIL", sig: "criteria-pending", note: "criteria run never returned" };
 			r.endedAt = new Date().toISOString();
@@ -501,7 +505,7 @@ export function advanceTask(cwd: string, slug: string, extPath: string): Advance
 		// 4. Append the write-ahead PENDING record, then spawn. A PENDING round
 		// that already has an event stream was spawned but never recorded —
 		// decide it as crashed (inspect its events) instead of spawning a duplicate.
-		let next = m.rounds.find((r) => r.headPid === null);
+		let next = m.rounds.find((r) => r.headPid === null && r.outcome === null);
 		if (next && safeRead(workerEventsPath(dir, next.id)) !== null) {
 			next.outcome = { ...crashOutcome(), note: "spawn record lost; decided from existing event stream" };
 			next.endedAt = new Date().toISOString();
@@ -545,13 +549,8 @@ function writeTerminal(cwd: string, dir: string, m: Manifest, state: TerminalSta
 	writeManifest(manifestPath(dir), m);
 	const lines = [`terminal: ${state} — ${note}`];
 	if (m.config.onEventCmd) {
-		const r = spawnSync("bash", ["-c", m.config.onEventCmd], {
-			cwd,
-			encoding: "utf-8",
-			timeout: m.config.criteriaTimeoutMs,
-			env: { ...process.env, NIGHTWATCH_SLUG: m.slug, NIGHTWATCH_STATE: state, NIGHTWATCH_DIR: dir },
-		});
-		lines.push(r.error ? `onEventCmd spawn error: ${r.error.message}` : r.status === 0 ? "onEventCmd fired" : `onEventCmd exited ${r.status}`);
+		const r = runShell(cwd, m.config.onEventCmd, m.config, { ...process.env, NIGHTWATCH_SLUG: m.slug, NIGHTWATCH_STATE: state, NIGHTWATCH_DIR: dir });
+		lines.push(r.exit === null ? `onEventCmd spawn error: ${r.tail}` : r.exit === 0 ? "onEventCmd fired" : `onEventCmd exited ${r.exit}`);
 	}
 	return lines;
 }
@@ -561,16 +560,31 @@ function writeTerminal(cwd: string, dir: string, m: Manifest, state: TerminalSta
 /** Stop: TERM to head pid + TERM to its group, KILL to the group after the grace window. */
 export async function stopTask(cwd: string, slug: string): Promise<string[]> {
 	const dir = taskDir(cwd, slug);
-	const m = readManifest(manifestPath(dir));
-	const release = acquireLock(dir, m.config);
+	const lockCfg = readManifest(manifestPath(dir)).config; // pre-lock read is for the claim only; state is re-read under the lock
+	const release = acquireLock(dir, lockCfg);
+	let m: Manifest;
+	try {
+		m = readManifest(manifestPath(dir));
+	} catch (err) {
+		release();
+		throw err;
+	}
 	try {
 		if (m.terminal) return [`terminal already: ${m.terminal.state}`];
 		const live = [...m.rounds].reverse().find((r) => r.headPid !== null && pidAlive(r.headPid, r.headStart) && r.outcome === null);
 		if (!live) {
 			// Nothing to kill — but a parked round would otherwise wait forever: record the stop.
 			const verdicts = readVerdicts(verdictsPath(dir));
-			const parkedRound = m.rounds.find((r) => r.outcome === null && r.headPid !== null && roundWaitState(r, [...verdicts].reverse().find((v) => v.round === r.id) ?? null) !== null);
-			if (!parkedRound) return ["no live round"];
+			const parkedRound = m.rounds.find((r) => r.outcome === null && r.headPid !== null && roundWaitState(r, lastVerdictFor(verdicts, r.id)) !== null);
+			if (!parkedRound) {
+				// No live head and no park. If the task would continue (undecided rounds, or terminal
+				// rules not yet decided), losing the stop would let the next advance spawn on — record it.
+				// If the outcome is already determined, the terminal is the truer record than a stop.
+				const undecided = m.rounds.find((r) => r.outcome === null);
+				const determined = m.rounds.every((r) => r.outcome !== null) && terminalFromOutcomes(m.rounds.map((r) => r.outcome as NonNullable<typeof r.outcome>), m.config.maxRounds) !== null;
+				if (determined) return ["no live round — next advance records the terminal state"];
+				return writeTerminal(cwd, dir, m, "STOPPED", `stopped by user during round ${(undecided ?? m.rounds[m.rounds.length - 1]).id} (not running)`);
+			}
 			parkedRound.endedAt = new Date().toISOString();
 			return writeTerminal(cwd, dir, m, "STOPPED", `stopped by user while round ${parkedRound.id} was WAITING`);
 		}
@@ -610,7 +624,7 @@ export function statusText(cwd: string, slug: string): string {
 		else if (r.headPid === null) state = "PENDING";
 		else if (pidAlive(r.headPid, r.headStart)) state = `RUNNING pid ${r.headPid}`;
 		else {
-			const last = [...verdicts].reverse().find((v) => v.round === r.id) ?? null;
+			const last = lastVerdictFor(verdicts, r.id);
 			const wait = roundWaitState(r, last);
 			state = wait ? `WAITING on \`${wait.check_cmd}\` (attempt ${wait.attempts + 1} of ${m.config.waitMaxAttempts}, next check ${wait.nextCheckAt})` : "dead";
 		}
@@ -645,7 +659,7 @@ export function statusLine(cwd: string, slug: string): string | null {
 	else if (last.outcome !== null) phase = "decided";
 	else if (last.headPid !== null && pidAlive(last.headPid, last.headStart)) phase = `round ${last.id} RUNNING (pid ${last.headPid})`;
 	else {
-		const wait = roundWaitState(last, [...verdicts].reverse().find((v) => v.round === last.id) ?? null);
+		const wait = roundWaitState(last, lastVerdictFor(verdicts, last.id));
 		phase = wait ? `round ${last.id} WAITING (attempt ${wait.attempts + 1}, next ${wait.nextCheckAt})` : `round ${last.id} settling`;
 	}
 	return `watch ${m.slug}: ${phase} · ${verdicts.length} verdicts · ${decisions} decisions · rounds ${m.rounds.length}/${m.config.maxRounds}`;

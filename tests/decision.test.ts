@@ -7,6 +7,7 @@ const V = (passed: boolean, notes: string): Verdict => ({ at: "t", round: 1, pas
 check("pass with criteria exit 0", decideOutcome({ tampered: false, verdict: V(true, "done"), criteriaConfigured: true, criteriaExit: 0 })?.what === "PASS");
 check("pass blocked while criteria pending", decideOutcome({ tampered: false, verdict: V(true, "done"), criteriaConfigured: true, criteriaExit: null }) === null);
 check("verdict pass but criteria fails", decideOutcome({ tampered: false, verdict: V(true, "done"), criteriaConfigured: true, criteriaExit: 1 })?.what === "FAIL");
+check("criteria tail lands in the FAIL note", decideOutcome({ tampered: false, verdict: V(true, "done"), criteriaConfigured: true, criteriaExit: 2, criteriaTail: "AssertionError: expected 3 to be 4\n    at test.js:7" })?.note.includes("exited 2 — AssertionError: expected 3 to be 4") === true);
 check("verdict-only pass", decideOutcome({ tampered: false, verdict: V(true, "done"), criteriaConfigured: false, criteriaExit: null })?.what === "PASS");
 check("rejection sig hashes notes", decideOutcome({ tampered: false, verdict: V(false, "still broken\nmore"), criteriaConfigured: false, criteriaExit: null })?.sig === sha256("still broken"));
 check("no verdict fails round", decideOutcome({ tampered: false, verdict: null, criteriaConfigured: false, criteriaExit: null })?.sig === "no-verdict");

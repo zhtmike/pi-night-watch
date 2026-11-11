@@ -97,7 +97,7 @@ reference in [docs/api.md](docs/api.md):
 - **`/watch start`** — create the task (atomic manifest) and spawn round 1; flags: `--criteria`, `--criteria-files`, `--slug`, `--review` (an independent rubric sent to worker and reviewer alike), `--goal-file` (goal from a file, verbatim — the way to pass multi-line prompts).
 - **`/watch status`** — derived state: rounds, verdict chain, decision chain, terminal.
 - **`/watch advance`** — decide settled rounds, apply terminal rules, spawn the next round. Idempotent; single-flight. A parked round reports `WAITING`.
-- **`/watch stop`** — TERM head + group, KILL after grace; terminal `STOPPED`. A WAITING task stops with nothing to kill — the park ends in `STOPPED`.
+- **`/watch stop`** — TERM head + group, KILL after grace; terminal `STOPPED`. Nothing running (WAITING, settling, or between rounds)? The stop is still recorded — a scheduled kicker can never spawn against it; only an already-determined terminal outcome outranks a stop.
 - **`review_gate`** (worker tool) — spawn the fresh-context reviewer, return its verdict.
 - **`consult_reviewer`** (worker tool) — escalate a fork to the decision authority; the question, options, and choice land in an append-only ledger — the watch never stalls at a decision.
 - **`submit_verdict`** (reviewer tool) — `passed`, `notes`, `evidence[]`, optionally `wait {check_cmd, due_at}` to park on an external condition; `submit_decision` (decision-mode reviewer) answers consultations. Each child role sees only its own tools.
