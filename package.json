@@ -1,6 +1,6 @@
 {
 	"name": "@zhtmike/pi-night-watch",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Long-horizon worker/reviewer loop for the pi coding agent",
 	"author": "zhtmike",
 	"keywords": [
