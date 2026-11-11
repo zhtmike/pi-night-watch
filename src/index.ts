@@ -1,8 +1,11 @@
 /**
- * pi extension — env-gated three-mode factory:
+ * pi extension — env-gated three-mode factory (decider gate first: a decider
+ * child carries TASK_DIR/ROUND too, and a mis-ordered gate would silently
+ * register the wrong tools):
  *
+ *   NIGHTWATCH_DECIDER=1     → decision child: registers `submit_decision` only
  *   NIGHTWATCH_REVIEWER=1    → reviewer child: registers `submit_verdict` only
- *   NIGHTWATCH_TASK_DIR set  → worker child:   registers `review_gate` only
+ *   NIGHTWATCH_TASK_DIR set  → worker child:   registers `review_gate` + `consult_reviewer`
  *   otherwise                → interactive session: `/watch` commands
  *
  * Children load this file via `-e <abs path>`; the env markers are the
@@ -12,8 +15,8 @@
 import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { defineTool, type AgentToolResult, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { validateVerdictArgs } from "./events.ts";
-import { advanceTask, latestSlug, parseStartArgs, resolveGoal, runReviewGate, startTask, statusText, stopTask } from "./driver.ts";
+import { validateVerdictArgs, validateConsultArgs, validateDecisionArgs } from "./events.ts";
+import { advanceTask, latestSlug, parseStartArgs, resolveGoal, runConsultation, runReviewGate, startTask, statusText, stopTask } from "./driver.ts";
 
 const EXT_PATH = fileURLToPath(import.meta.url);
 const text = (s: string): AgentToolResult => ({ content: [{ type: "text", text: s }], details: {} });
@@ -41,6 +44,22 @@ const submitVerdictTool = defineTool({
 	},
 });
 
+const submitDecisionTool = defineTool({
+	name: "submit_decision",
+	label: "Submit decision",
+	description:
+		"Submit the decision for the worker's question. Call exactly once, as your final act. choice: one of the stated options; reasoning: why that option, ≤500 chars.",
+	parameters: Type.Object({
+		choice: Type.String({ description: "Exactly one of the options stated in the brief" }),
+		reasoning: Type.String({ description: "Why this option, ≤500 chars" }),
+	}),
+	async execute(_toolCallId: string, params: unknown) {
+		const v = validateDecisionArgs(params);
+		if ("error" in v) return { content: [{ type: "text", text: `decision rejected: ${v.error}. Call submit_decision again with a valid shape.` }], details: {} };
+		return { content: [{ type: "text", text: `decision recorded (${v.choice}). You may now finish.` }], details: {} };
+	},
+});
+
 const reviewGateTool = defineTool({
 	name: "review_gate",
 	label: "Review gate",
@@ -60,11 +79,44 @@ const reviewGateTool = defineTool({
 	},
 });
 
+const consultReviewerTool = defineTool({
+	name: "consult_reviewer",
+	label: "Consult reviewer",
+	description:
+		"Ask the decision authority when you face a fork you would otherwise stop and ask the owner about — an ambiguous requirement, a choice between implementations, a risky trade. State the question, the concrete options, and your recommendation; you get a decision back and continue on it. Never stall waiting for a human; never pick silently.",
+	parameters: Type.Object({
+		question: Type.String({ description: "The decision question, ≤500 chars" }),
+		options: Type.Array(Type.String({ description: "A concrete option" }), { minItems: 2 }),
+		recommendation: Type.Optional(Type.String({ description: "Your recommended option and why" })),
+	}),
+	async execute(_toolCallId: string, params: unknown) {
+		const dir = process.env.NIGHTWATCH_TASK_DIR;
+		const round = Number(process.env.NIGHTWATCH_ROUND ?? "0");
+		if (!dir || !Number.isInteger(round) || round < 1) {
+			return text("consult_reviewer unavailable: NIGHTWATCH_TASK_DIR/NIGHTWATCH_ROUND not set (this tool only exists inside night-watch worker rounds)");
+		}
+		const ask = validateConsultArgs(params);
+		if ("error" in ask) return text(`consult rejected: ${ask.error}. Call consult_reviewer again with a valid shape.`);
+		const d = await runConsultation(dir, round, ask, EXT_PATH);
+		return text(
+			d.choice === null
+				? `DECISION UNAVAILABLE — no parseable answer after retry; proceed on your own judgment (recorded as unanswered). Question: ${ask.question}`
+				: `DECISION: ${d.choice}\n${d.reasoning}`,
+		);
+	},
+});
+
 const USAGE = "usage: /watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] [<goal>] | /watch status [slug] | /watch advance [slug] | /watch stop [slug]";
 
 export default function (pi: ExtensionAPI) {
-	const reviewer = process.env.NIGHTWATCH_REVIEWER === "1";
-	const worker = !reviewer && Boolean(process.env.NIGHTWATCH_TASK_DIR);
+	const decider = process.env.NIGHTWATCH_DECIDER === "1";
+	const reviewer = !decider && process.env.NIGHTWATCH_REVIEWER === "1";
+	const worker = !decider && !reviewer && Boolean(process.env.NIGHTWATCH_TASK_DIR);
+
+	if (decider) {
+		pi.registerTool(submitDecisionTool);
+		return;
+	}
 
 	if (reviewer) {
 		pi.registerTool(submitVerdictTool);
@@ -72,6 +124,7 @@ export default function (pi: ExtensionAPI) {
 	}
 	if (worker) {
 		pi.registerTool(reviewGateTool);
+		pi.registerTool(consultReviewerTool);
 		return;
 	}
 

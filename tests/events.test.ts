@@ -1,4 +1,4 @@
-import { VERDICT_NOTES_MAX, parseEvents, validateVerdictArgs } from "../src/events.ts";
+import { VERDICT_NOTES_MAX, parseEvents, validateConsultArgs, validateDecisionArgs, validateVerdictArgs } from "../src/events.ts";
 import { check, finish } from "./harness.ts";
 
 const ev = (t: string, extra: Record<string, unknown> = {}) => JSON.stringify({ type: t, ...extra });
@@ -38,4 +38,20 @@ check("validate: wait must be an object", "error" in validateVerdictArgs({ passe
 check("validate: wait needs both fields", "error" in validateVerdictArgs({ passed: false, notes: "x", evidence: [], wait: { check_cmd: "true" } }));
 const noWait = validateVerdictArgs({ passed: false, notes: "x", evidence: [] });
 check("validate: no wait still valid", !("error" in noWait) && noWait.wait === undefined);
+
+// --- decisions ---
+const ask = validateConsultArgs({ question: "Tabs or spaces?", options: ["tabs", "spaces"], recommendation: "tabs — this repo already uses them" });
+check("consult: valid ask round-trips", !("error" in ask) && ask.question === "Tabs or spaces?" && ask.options.length === 2 && ask.recommendation === "tabs — this repo already uses them");
+check("consult: recommendation optional", (() => { const a = validateConsultArgs({ question: "q", options: ["a", "b"] }); return !("error" in a) && a.recommendation === null; })());
+check("consult: question cap", "error" in validateConsultArgs({ question: "x".repeat(501), options: ["a", "b"] }));
+check("consult: too few options", "error" in validateConsultArgs({ question: "q", options: ["only"] }));
+check("consult: wide asks are the asker's problem", (() => { const a = validateConsultArgs({ question: "q", options: Array.from({ length: 12 }, (_, i) => `o${i}`) }); return !("error" in a) && a.options.length === 12; })());
+check("consult: empty option rejected", "error" in validateConsultArgs({ question: "q", options: ["a", ""] }));
+
+const dec = validateDecisionArgs({ choice: "formal — the conventional default", reasoning: "r".repeat(600) });
+check("decision: recorded verbatim + reasoning truncated", !("error" in dec) && dec.choice === "formal — the conventional default" && dec.reasoning.length === 500);
+check("decision: shape errors", "error" in validateDecisionArgs({ reasoning: "r" }) && "error" in validateDecisionArgs({ choice: "a" }) && "error" in validateDecisionArgs("x"));
+check("consult: duplicate options are the asker's problem, not ours", !("error" in validateConsultArgs({ question: "q", options: ["a", "a"] })));
+const dStream = [ev("tool_execution_start", { toolName: "submit_decision", args: { choice: "tabs", reasoning: "r" } }), ev("agent_settled", { aborted: false })].join("\n") + "\n";
+check("parseEvents: decision calls extracted", parseEvents(dStream).decisionCalls.length === 1 && parseEvents(dStream).verdictCalls.length === 0);
 finish("events");

@@ -8,6 +8,8 @@ export interface ParsedEvents {
 	settled: boolean;
 	/** submit_verdict tool_execution_start args, in call order */
 	verdictCalls: { args: unknown }[];
+	/** submit_decision tool_execution_start args, in call order */
+	decisionCalls: { args: unknown }[];
 	/** last assistant message_end text */
 	finalAssistantText: string | null;
 	lineCount: number;
@@ -15,7 +17,7 @@ export interface ParsedEvents {
 
 /** A torn trailing line (no newline) is truncation and is skipped; any other malformed line throws. */
 export function parseEvents(text: string): ParsedEvents {
-	const out: ParsedEvents = { settled: false, verdictCalls: [], finalAssistantText: null, lineCount: 0 };
+	const out: ParsedEvents = { settled: false, verdictCalls: [], decisionCalls: [], finalAssistantText: null, lineCount: 0 };
 	const lines = text.split("\n");
 	for (let i = 0; i < lines.length; i++) {
 		const line = lines[i];
@@ -32,6 +34,7 @@ export function parseEvents(text: string): ParsedEvents {
 			out.settled = true;
 		} else if (ev.type === "tool_execution_start") {
 			if (ev.toolName === "submit_verdict") out.verdictCalls.push({ args: ev.args });
+			else if (ev.toolName === "submit_decision") out.decisionCalls.push({ args: ev.args });
 		} else if (ev.type === "message_end") {
 			const msg = ev.message as Record<string, unknown> | undefined;
 			if (msg && msg.role === "assistant" && Array.isArray(msg.content)) {
@@ -75,4 +78,45 @@ export function validateVerdictArgs(args: unknown): ValidatedVerdict | { error: 
 		wait = { check_cmd: w.check_cmd, due_at: w.due_at };
 	}
 	return { passed: r.passed, notes: r.notes.slice(0, VERDICT_NOTES_MAX), evidence: r.evidence.map((e) => String(e).slice(0, VERDICT_EVIDENCE_MAX)), ...(wait ? { wait } : {}) };
+}
+
+// --- decisions -------------------------------------------------------------------------------
+
+/** Decision field caps (schema contract) — storage hygiene, aligned with the verdict caps. */
+export const DECISION_QUESTION_MAX = 500;
+export const DECISION_OPTIONS_MIN = 2;
+export const DECISION_REASONING_MAX = 500;
+
+export interface ConsultAsk {
+	question: string;
+	options: string[];
+	recommendation: string | null;
+}
+
+/** Validate consult_reviewer shape (the worker's ask); the ask's quality is the asker's. */
+export function validateConsultArgs(args: unknown): ConsultAsk | { error: string } {
+	if (typeof args !== "object" || args === null) return { error: "consult args must be an object" };
+	const r = args as Record<string, unknown>;
+	if (typeof r.question !== "string" || r.question.length === 0 || r.question.length > DECISION_QUESTION_MAX) return { error: `"question" must be a non-empty string ≤ ${DECISION_QUESTION_MAX} chars` };
+	if (!Array.isArray(r.options) || r.options.length < DECISION_OPTIONS_MIN) {
+		return { error: `"options" must be an array of at least ${DECISION_OPTIONS_MIN} strings` };
+	}
+	for (const o of r.options) if (typeof o !== "string" || o.length === 0) return { error: `each option must be a non-empty string` };
+	let recommendation: string | null = null;
+	if (r.recommendation !== undefined && r.recommendation !== null) {
+		if (typeof r.recommendation !== "string" || r.recommendation.length === 0) return { error: `"recommendation" must be a non-empty string` };
+		recommendation = r.recommendation;
+	}
+	return { question: r.question, options: [...r.options], recommendation };
+}
+
+export type ValidatedDecision = { choice: string; reasoning: string };
+
+/** Validate submit_decision shape only — a called decision is recorded verbatim; judgment of the choice is the agents'. */
+export function validateDecisionArgs(args: unknown): ValidatedDecision | { error: string } {
+	if (typeof args !== "object" || args === null) return { error: "decision args must be an object" };
+	const r = args as Record<string, unknown>;
+	if (typeof r.choice !== "string" || r.choice.length === 0) return { error: `"choice" must be a non-empty string` };
+	if (typeof r.reasoning !== "string") return { error: `"reasoning" must be a string` };
+	return { choice: r.choice, reasoning: r.reasoning.slice(0, DECISION_REASONING_MAX) };
 }

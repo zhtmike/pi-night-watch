@@ -8,8 +8,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type WatchConfig } from "../src/config.ts";
-import { advanceTask, latestSlug, resolveGoal, startTask, stopTask } from "../src/driver.ts";
-import { manifestPath, taskDir, workerEventsPath, WatchError, appendVerdict, verdictsPath } from "../src/manifest.ts";
+import { advanceTask, latestSlug, resolveGoal, startTask, statusText, stopTask } from "../src/driver.ts";
+import { manifestPath, taskDir, workerEventsPath, WatchError, appendDecision, appendVerdict, decisionsPath, verdictsPath } from "../src/manifest.ts";
 import { readManifest, writeManifest } from "../src/manifest.ts";
 import { check, finish } from "./harness.ts";
 
@@ -201,6 +201,19 @@ const past = new Date(Date.now() - 60_000).toISOString();
 	const rep = advanceTask(root, slug, EXT);
 	const mNew = readManifest(manifestPath(dir));
 	check("old snapshot: nonzero check parks on defaults, no throw", rep.lines[0].includes("WAITING") && mNew.rounds[0].waitAttempts === 1 && typeof mNew.rounds[0].waitNextCheckAt === "string");
+}
+
+// statusText renders the decision chain (audit after the fact is the point).
+{
+	const { root, slug } = parkedTask("status decision chain", "exit 0", future);
+	const dDir = taskDir(root, slug);
+	appendDecision(decisionsPath(dDir), { at: "t", round: 1, question: "fork?\nsecond line", options: ["a", "b"], recommendation: "a", choice: "a", reasoning: "r" });
+	appendDecision(decisionsPath(dDir), { at: "t", round: 1, question: "other?", options: ["x", "y"], recommendation: null, choice: null, reasoning: "DECIDER_OUTPUT_UNPARSEABLE: no valid submit_decision call" });
+	const st = statusText(root, slug);
+	check(
+		"status: decision chain with recommendation and unanswered",
+		st.includes("decision r1: a — fork? (worker recommended: a)") && st.includes("decision r1: unanswered — other?"),
+	);
 }
 
 finish("driver");

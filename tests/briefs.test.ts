@@ -1,7 +1,7 @@
-import type { Manifest, Verdict } from "../src/manifest.ts";
+import type { Decision, Manifest, Verdict } from "../src/manifest.ts";
 import { DEFAULT_WATCH_CONFIG } from "../src/config.ts";
 import { crashOutcome } from "../src/decision.ts";
-import { reviewerBrief, workerBrief } from "../src/briefs.ts";
+import { DECISIONS_IN_BRIEF_MAX, decisionBrief, reviewerBrief, workerBrief } from "../src/briefs.ts";
 import { check, finish } from "./harness.ts";
 
 const cfg = { ...DEFAULT_WATCH_CONFIG };
@@ -25,4 +25,15 @@ check("reviewer: prior findings state included", reviewerBrief(m1, [rej], false)
 check("rubric: worker sees the bar", workerBrief(mR, [], 1, null).includes("the bar your work must clear): no + operator in src"));
 check("rubric: reviewer verifies against it", reviewerBrief(mR, [], false).includes("verify against this): no + operator in src"));
 check("rubric: omitted when null", !workerBrief(m1, [], 1, null).includes("rubric") && !reviewerBrief(m1, [], false).includes("rubric"));
+
+const dec = (round: number, choice: string | null): Decision => ({ at: "t", round, question: `fork ${round}`, options: ["a", "b"], recommendation: "a", choice, reasoning: "r" });
+const m2r = mk([{ id: 1, headPid: 1, headStart: "s", startedAt: "t", spawnedAt: "t", endedAt: "t", outcome: { what: "FAIL", sig: "x", note: "n" } }, { id: 2, headPid: null, headStart: null, startedAt: "t", spawnedAt: null, endedAt: null, outcome: null }]);
+check("worker brief: previous round's decisions as state", (() => { const b = workerBrief(m2r, [], 2, null, [dec(1, "a"), dec(1, null), dec(2, "b")]); return b.includes("decision r1: a — fork 1") && b.includes("decision r1: unanswered — fork 1") && !b.includes("fork 2"); })());
+check("worker brief: no decision lines when none exist", !workerBrief(m2r, [], 2, null, []).includes("decision r"));
+const ask = { question: "Tabs or spaces?", options: ["tabs", "spaces"], recommendation: "tabs" };
+check("decision brief: goal + question + options + recommendation state", (() => { const b = decisionBrief(m1, [], ask, false); return b.includes("Goal under review: g") && b.includes("Tabs or spaces?") && b.includes("- tabs") && b.includes("Worker recommendation: tabs") && !b.includes("You are"); })());
+check("decision brief: prior decisions tail-capped", (() => { const many = Array.from({ length: DECISIONS_IN_BRIEF_MAX + 3 }, (_, i) => dec(i + 1, "a")); const b = decisionBrief(m1, many, ask, false); return b.includes(`fork ${DECISIONS_IN_BRIEF_MAX + 3}`) && !b.includes("fork 1\n") && b.split("decision r").length - 1 === DECISIONS_IN_BRIEF_MAX; })());
+check("decision brief: repair demands the call", decisionBrief(m1, [], ask, true).includes("MUST end by calling the `submit_decision` tool"));
+const mCrit = { ...m1, config: { ...cfg, criteria: "npm test" } };
+check("decision brief: criteria command included", decisionBrief(mCrit, [], ask, false).includes("Stated criteria command: `npm test`"));
 finish("briefs");

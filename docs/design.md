@@ -4,7 +4,7 @@ Positioning, contracts' rationale, and boundaries. The full surface reference is
 
 ## Positioning
 
-pi sessions and their dispatch lanes are fire-and-forget: a lane takes a brief, returns an artifact, and nothing iterates on a verdict. Long-horizon work — where a round of changes must be independently verified, rejected findings disposed of, and the next round seeded from the last — has no owner in that model. pi-night-watch fills exactly that slot and nothing else: the loop, the gate, and the files. It composes with, and does not replace, lane dispatch: worker children are ordinary headless pi processes and inherit whatever the host loads (a worker may fan out through any dispatch tool the user has installed; depth control stays with that tool). A task carries its goal verbatim into every round brief — approvals, constraints, and scope live in the goal text, and anything beyond it is a report item, never auto-executed. Round briefs carry state only, never methodology: instructions and working style ride the goal text and the ambient skills, and the tools' descriptions state their own contracts.
+pi sessions and their dispatch lanes are fire-and-forget: a lane takes a brief, returns an artifact, and nothing iterates on a verdict. Long-horizon work — where a round of changes must be independently verified, rejected findings disposed of, and the next round seeded from the last — has no owner in that model. pi-night-watch fills exactly that slot and nothing else: the loop, the gate, and the files. It composes with, and does not replace, lane dispatch: worker children are ordinary headless pi processes and inherit whatever the host loads (a worker may fan out through any dispatch tool the user has installed; depth control stays with that tool). A task carries its goal verbatim into every round brief — approvals, constraints, and scope live in the goal text, and anything beyond it is a report item, never auto-executed. Round briefs carry state only, never methodology: instructions and working style ride the goal text and the ambient skills, and the tools' descriptions state their own contracts. Unattended rounds never stop at a fork: the worker escalates to the same fresh-context reviewer machinery as a decision authority, and every question, option, and choice lands in an append-only ledger for the human who returns.
 
 ## Pillars
 
@@ -47,7 +47,7 @@ What can break: children ride pi's CLI surface (`--mode json --no-session --appr
 
 1. Core loop (shipped): spawn core, manifest/verdicts, `/watch`, `review_gate`, state machine, caps.
 2. Waits + scheduled advance (shipped): `wait {check_cmd, due_at}` verdict field ⇒ WAITING; the `night-watch` kicker bin; retry-in-place with backoff.
-3. Unattended decision escalation: the reviewer as decision authority when a worker would otherwise stop and ask.
+3. Unattended decision escalation (shipped): the reviewer as decision authority — `consult_reviewer` / `submit_decision`, append-only decisions ledger, decision chain in status.
 4. Inspector + events: statusbar live round, `/watch` overlay (verdict chain, events tail), `onEventCmd` on terminal states.
 
 Unscheduled: worker session continuity (`--session-id`); reviewer calibration harness.

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { WatchError, readManifest, readVerdicts, writeManifest, type Manifest } from "../src/manifest.ts";
+import { WatchError, appendDecision, readDecisions, readManifest, readVerdicts, writeManifest, type Manifest } from "../src/manifest.ts";
 import { check, finish } from "./harness.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nw-manifest-"));
@@ -43,4 +43,11 @@ try {
 } catch {
 	check("verdicts: mid-file corruption throws", true);
 }
+const dFile = path.join(tmp, "d.jsonl");
+const dec = { at: "t", round: 2, question: "q", options: ["a", "b"], recommendation: "a", choice: "a", reasoning: "r" };
+appendDecision(dFile, dec);
+appendDecision(dFile, { ...dec, choice: null, reasoning: "DECIDER_OUTPUT_UNPARSEABLE" });
+fs.appendFileSync(dFile, '{"torn');
+check("decisions: append + read + torn tail", readDecisions(dFile).length === 2 && readDecisions(dFile)[1].choice === null);
+check("decisions: absent file is empty", readDecisions(path.join(tmp, "none.jsonl")).length === 0);
 finish("manifest");
