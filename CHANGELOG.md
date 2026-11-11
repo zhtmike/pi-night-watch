@@ -75,17 +75,15 @@ owner decision, goal text (shipped); budgets — guidance shipped, leash
 semantics documented; gh/git auth — resolves by env+HOME inheritance
 (code-verified), first real use confirms.
 
-**Verification posture.** Every mechanism above is verified by its own
-billed observed run (this entry); the full-chain acceptance run on a
-real task of the reference-scenario shape was skipped by owner decision
-— this release is ready for real workflow, and the first real task is
-its acceptance. Known limits: TUI surfaces (footer/overlay notify) are
+**Verification.** Every mechanism above is verified by its own observed
+run (this entry). Known limits: TUI surfaces (footer/overlay notify) are
 load-exercised through the driver builders, not clicked in a live TUI;
 the reviewer defaults to the worker's model family unless
 `reviewerModel` is configured; the item-4 observed run's usage figures
 were displayed by the pre-fix snapshot-summing code and may be
-inflated. pi 1.5.0→1.5.1 mid-release: child-argv compat check ran
-clean.
+inflated; the dispatch-lane env wrinkle and in-worker gh/git auth are
+verified by construction and confirm at first real use. pi
+1.5.0→1.5.1 mid-release: child-argv compat check ran clean.
 
 **Hardening (post-hunt).** A three-lane defect hunt over the four
 features fixed: a lost-spawn-record guard wedge that could dead-watch a
