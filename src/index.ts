@@ -66,6 +66,9 @@ const reviewGateTool = defineTool({
 	description:
 		"Send the current state to an independent fresh-context reviewer and get its verdict. Call this when you believe the goal is met — never claim completion without it. Takes no arguments; the reviewer sees the goal, criteria, and prior findings itself.",
 	parameters: Type.Object({}),
+	// k-indexed ledgers and one-stream-per-attempt are not concurrency-safe: a parallel
+	// tool-call burst would interleave reviewer streams.
+	executionMode: "sequential",
 	async execute() {
 		const dir = process.env.NIGHTWATCH_TASK_DIR;
 		const round = Number(process.env.NIGHTWATCH_ROUND ?? "0");
@@ -89,6 +92,7 @@ const consultReviewerTool = defineTool({
 		options: Type.Array(Type.String({ description: "A concrete option" }), { minItems: 2 }),
 		recommendation: Type.Optional(Type.String({ description: "Your recommended option and why" })),
 	}),
+	executionMode: "sequential",
 	async execute(_toolCallId: string, params: unknown) {
 		const dir = process.env.NIGHTWATCH_TASK_DIR;
 		const round = Number(process.env.NIGHTWATCH_ROUND ?? "0");

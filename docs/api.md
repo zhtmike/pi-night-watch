@@ -36,7 +36,7 @@ The stateless driver step. Decides every settled-but-undecided round, applies te
 
 ### `/watch stop [slug]`
 
-TERM to the round head + TERM to its process group, KILL to the group after `killGraceSec`. Terminal state `STOPPED`. Holds the single-flight lock while stopping. A WAITING round has nothing to kill — the stop simply records `STOPPED` and ends the park.
+TERM to the round head + TERM to its process group, KILL to the group after `killGraceSec`. Terminal state `STOPPED`. Holds the single-flight lock while stopping. A WAITING round has nothing to kill — the stop simply records `STOPPED` and ends the park. The stop is durable in the round-transition window too (settled-but-undecided, or a write-ahead PENDING round): a stop while nothing is running still records `STOPPED`, so a scheduled kicker cannot spawn the next round against it.
 
 ## Tools
 
@@ -102,7 +102,7 @@ The round leash bounds *everything* the round starts: sub-agents or lanes spawne
 A round is decided exactly once, then immutable in the manifest:
 
 - **PASS** ⇔ the last verdict for the round is `passed:true` **and** the criteria command (if configured) exits 0 when run by the driver — or a wait satisfied (below).
-- **FAIL** — reviewer rejected; or verdict pass with criteria failing; or the round settled without calling `review_gate`; or the tamper guard tripped (criteria files changed or unreadable since start); or a wait exhausted / wait satisfied with criteria red.
+- **FAIL** — reviewer rejected; or verdict pass with criteria failing (the note carries the first line of criteria output); or the round settled without calling `review_gate`; or the tamper guard tripped (criteria files changed or unreadable since start); or a wait exhausted / wait satisfied with criteria red.
 - **CRASHED** — the round head died before the worker settled. The next round's brief is seeded from the crashed round's event stream (inspect, never replay).
 
 Terminal states: `DONE` (first PASS wins), `HALT_STAGNANT` (identical failure signature twice — two crashes share a signature), `HALT_BUDGET` (maxRounds exhausted), `HALT_ERROR` (spawn failure), `STOPPED`.
@@ -143,7 +143,7 @@ No scheduler ships with it. Recipes, both firing often enough that `waitRetryMax
 </dict></plist>
 ```
 
-The check commands run with your user's credentials and environment — only point `check_cmd` at commands you trust, exactly as with `criteria`.
+The check commands run with your user's credentials and environment — only point `check_cmd` at commands you trust, exactly as with `criteria`. Driver-run shells (`criteria`, `check_cmd`, `onEventCmd`) run under the `timeout` leash, so a timeout kills the command's whole process tree, not just its shell. Drive one workspace from one install (one bin, one extension) — a cron entry pointing at a different install than the interactive session silently advances the same tasks with two codebases.
 
 ## Mechanics
 

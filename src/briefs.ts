@@ -46,11 +46,17 @@ export function workerBrief(m: Manifest, verdicts: Verdict[], round: number, las
 	return lines.join("\n") + "\n";
 }
 
-export function reviewerBrief(m: Manifest, verdicts: Verdict[], repair: boolean): string {
-	const lines: string[] = ["# Independent review", "", `Goal under review: ${m.goal}`];
+/** The goal/criteria/rubric header shared by every fresh-context child role. */
+function headerLines(m: Manifest): string[] {
+	const lines: string[] = [`Goal under review: ${m.goal}`];
 	if (m.config.criteria) lines.push(`Stated criteria command: \`${m.config.criteria}\``);
 	if (m.reviewRubric) lines.push(`Reviewer rubric (verify against this): ${m.reviewRubric}`);
 	if (m.criteriaFiles.length > 0) lines.push(`Criteria files: ${m.criteriaFiles.join(", ")}`);
+	return lines;
+}
+
+export function reviewerBrief(m: Manifest, verdicts: Verdict[], repair: boolean): string {
+	const lines: string[] = ["# Independent review", "", ...headerLines(m)];
 	const last = verdicts[verdicts.length - 1];
 	if (last) lines.push("", `## Prior findings`, `Previous notes: ${last.notes}`);
 	if (repair) lines.push("", "**Your previous reply did not produce a parseable verdict.** You MUST end by calling the `submit_verdict` tool exactly once.");
@@ -58,10 +64,7 @@ export function reviewerBrief(m: Manifest, verdicts: Verdict[], repair: boolean)
 }
 
 export function decisionBrief(m: Manifest, decisions: Decision[], ask: { question: string; options: string[]; recommendation: string | null }, repair: boolean): string {
-	const lines: string[] = ["# Decision consultation", "", `Goal under review: ${m.goal}`];
-	if (m.config.criteria) lines.push(`Stated criteria command: \`${m.config.criteria}\``);
-	if (m.reviewRubric) lines.push(`Reviewer rubric (verify against this): ${m.reviewRubric}`);
-	if (m.criteriaFiles.length > 0) lines.push(`Criteria files: ${m.criteriaFiles.join(", ")}`);
+	const lines: string[] = ["# Decision consultation", "", ...headerLines(m)];
 	const prior = decisions.slice(-DECISIONS_IN_BRIEF_MAX);
 	if (prior.length > 0) {
 		lines.push("", "## Prior decisions");

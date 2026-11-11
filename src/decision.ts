@@ -6,6 +6,14 @@
 import { createHash } from "node:crypto";
 import type { RoundOutcome, RoundRec, Verdict } from "./manifest.ts";
 
+/** The last verdict recorded for a round — the park derivation must key on exactly this everywhere. */
+export function lastVerdictFor(verdicts: Verdict[], round: number): Verdict | null {
+	return [...verdicts].reverse().find((v) => v.round === round) ?? null;
+}
+
+/** Characters of criteria output kept in a FAIL note — every model-visible string is bounded. */
+export const VERDICT_NOTE_TAIL_MAX = 500;
+
 export interface DecideInput {
 	/** criteriaFiles hash changed (or became unreadable) since task start */
 	tampered: boolean;
@@ -14,6 +22,8 @@ export interface DecideInput {
 	criteriaConfigured: boolean;
 	/** driver-run criteria exit code; null only while a run is still pending */
 	criteriaExit: number | null;
+	/** last lines of criteria output, when the driver ran it and it failed */
+	criteriaTail?: string;
 }
 
 export type DecideResult = { what: "PASS" | "FAIL"; sig: string; note: string } | null;
@@ -30,7 +40,9 @@ export function decideOutcome(input: DecideInput): DecideResult {
 	}
 	if (input.criteriaConfigured && input.criteriaExit === null) return null;
 	if (input.criteriaConfigured && input.criteriaExit !== 0) {
-		return { what: "FAIL", sig: `criteria-exit-${input.criteriaExit}`, note: `reviewer passed but criteria command exited ${input.criteriaExit}` };
+		const first = input.criteriaTail !== undefined ? firstLine(input.criteriaTail).slice(0, VERDICT_NOTE_TAIL_MAX) : "";
+		const why = first !== "" ? ` — ${first}` : "";
+		return { what: "FAIL", sig: `criteria-exit-${input.criteriaExit}`, note: `reviewer passed but criteria command exited ${input.criteriaExit}${why}` };
 	}
 	return { what: "PASS", sig: "pass", note: input.criteriaConfigured ? "reviewer passed; criteria exit 0" : "reviewer passed (verdict-only mode)" };
 }
