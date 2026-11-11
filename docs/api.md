@@ -6,6 +6,10 @@ Commands, tools, configuration, on-disk state, and the mechanics behind them. Th
 
 All commands operate on the most recent task when `[slug]` is omitted.
 
+### `/watch [slug]`
+
+The inspector: full status (config, rounds, verdict chain, decision chain, terminal) plus the live round's event tail (assistant messages, tool calls, settle) and task-wide usage/cost — each response's latest `message_update` usage snapshot, accumulated at its close. Zero model tokens — everything is read from disk. While a session is open, the footer also carries a live one-line status (`watch <slug>: round N RUNNING · …`) refreshed every 5 s while a task is live, cleared when none is.
+
 ### `/watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] [<goal>]`
 
 Creates a task (atomic manifest under `.pi/night-watch/<slug>/`) and spawns round 1. Flags:
@@ -67,6 +71,7 @@ Roles are env-gated; each child sees only its own tools (`submit_verdict` for th
 | `waitRetryMaxMs` | `900000` | Cap on any single wait-check retry delay |
 | `waitMaxAttempts` | `5` | Nonzero checks a parked round tolerates before `wait-exhausted` |
 | `criteria` | — | Shell command run by the driver; PASS requires exit 0. Unset = verdict-only mode (weaker) |
+| `onEventCmd` | — | Shell command fired when a task reaches a terminal state (`DONE`/`HALT_*` from `advance`, `STOPPED` from `stop`), run at the workspace root with `NIGHTWATCH_SLUG`, `NIGHTWATCH_STATE`, `NIGHTWATCH_DIR` in the environment; bounded by `criteriaTimeoutMs` and runs while the single-flight lock is held. Trust posture identical to `criteria` — it executes on terminal; only configure it in repositories you trust |
 
 ### Sizing long tasks
 
@@ -147,4 +152,5 @@ The check commands run with your user's credentials and environment — only poi
 - **Write-ahead intent** — the round record exists in the manifest before spawn. A PENDING round that already has an event stream was spawned but never recorded: it is decided CRASHED from that stream, never respawned.
 - **Atomic writes** — exclusive-create tmp → write → fsync → rename → dir-fsync; the rename is the commit point. Verdicts and events are newline-terminated append-only; a torn trailing line is truncation and skipped.
 - **Single-flight lock** — `advance.lock` claimed O_EXCL with pid + `ps -o lstart=` start time; same-host stale claims are taken over via rename (a lost takeover race retries), foreign hosts fail closed, unreadable claims only past `lockGraceMs`. `stop` holds the same lock so a racing advance cannot clobber `STOPPED`.
+- **Terminal events** — every terminal write (advance's `DONE`/`HALT_*`, stop's `STOPPED`) goes through one path that fires the configured `onEventCmd` at the workspace root with `NIGHTWATCH_SLUG`/`NIGHTWATCH_STATE`/`NIGHTWATCH_DIR` in the environment; a nonzero exit is surfaced in the advance/stop report, never swallowed.
 - **Crash recovery** — loss is bounded to ≤ one round: everything that reached an event stream is on disk, and the next round's brief carries the crashed round's last words.

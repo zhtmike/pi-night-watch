@@ -48,6 +48,6 @@ What can break: children ride pi's CLI surface (`--mode json --no-session --appr
 1. Core loop (shipped): spawn core, manifest/verdicts, `/watch`, `review_gate`, state machine, caps.
 2. Waits + scheduled advance (shipped): `wait {check_cmd, due_at}` verdict field ⇒ WAITING; the `night-watch` kicker bin; retry-in-place with backoff.
 3. Unattended decision escalation (shipped): the reviewer as decision authority — `consult_reviewer` / `submit_decision`, append-only decisions ledger, decision chain in status.
-4. Inspector + events: statusbar live round, `/watch` overlay (verdict chain, events tail), `onEventCmd` on terminal states.
+4. Inspector + events (shipped): statusbar live round, bare `/watch` overlay (verdict chain, decision chain, events tail, usage), `onEventCmd` on terminal states.
 
 Unscheduled: worker session continuity (`--session-id`); reviewer calibration harness.

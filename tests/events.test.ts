@@ -54,4 +54,21 @@ check("decision: shape errors", "error" in validateDecisionArgs({ reasoning: "r"
 check("consult: duplicate options are the asker's problem, not ours", !("error" in validateConsultArgs({ question: "q", options: ["a", "a"] })));
 const dStream = [ev("tool_execution_start", { toolName: "submit_decision", args: { choice: "tabs", reasoning: "r" } }), ev("agent_settled", { aborted: false })].join("\n") + "\n";
 check("parseEvents: decision calls extracted", parseEvents(dStream).decisionCalls.length === 1 && parseEvents(dStream).verdictCalls.length === 0);
+const uStream =
+	[
+		ev("message_update", { usage: { totalTokens: 1200, cost: { total: 0.01 } } }),
+		ev("message_update", { usage: { totalTokens: 2000, cost: { total: 0.02 } } }),
+		ev("message_end", { message: { role: "assistant", content: [] } }),
+		ev("message_update", { usage: { totalTokens: 500, cost: { total: 0.03 } } }),
+		ev("message_end", { message: { role: "assistant", content: [] } }),
+		ev("agent_settled", {}),
+	].join("\n") + "\n";
+check(
+	"parseEvents: usage = latest cumulative snapshot per response, accumulated at message_end",
+	(() => {
+		const p = parseEvents(uStream);
+		return p.usage.tokens === 2500 && Math.abs(p.usage.cost - 0.05) < 1e-9;
+	})(),
+);
+check("parseEvents: no usage events ⇒ zero", parseEvents(dStream).usage.tokens === 0 && parseEvents(dStream).usage.cost === 0);
 finish("events");

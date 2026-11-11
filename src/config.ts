@@ -45,6 +45,8 @@ export interface WatchConfig {
 	waitMaxAttempts: number;
 	/** Shell command run by the driver; PASS requires exit 0. Unset = verdict-only mode. */
 	criteria?: string;
+	/** Shell command fired when a task reaches a terminal state (trust posture identical to criteria). */
+	onEventCmd?: string;
 }
 
 export const DEFAULT_WATCH_CONFIG: WatchConfig = {
@@ -64,7 +66,7 @@ export const DEFAULT_WATCH_CONFIG: WatchConfig = {
 };
 
 const INT_KEYS = ["maxRounds", "roundDeadlineMin", "reviewerDeadlineMin", "killGraceSec", "criteriaTimeoutMs", "lockGraceMs", "preflightTimeoutMs", "pollJitterMs", "waitRetryBaseMs", "waitRetryMaxMs", "waitMaxAttempts"] as const;
-const STR_KEYS = ["workerModel", "reviewerModel", "criteria", "piBin", "timeoutBin"] as const;
+const STR_KEYS = ["workerModel", "reviewerModel", "criteria", "piBin", "timeoutBin", "onEventCmd"] as const;
 const THINKING_KEYS = ["workerThinkingLevel", "reviewerThinkingLevel"] as const;
 
 /** Parse + validate config. Throws ConfigError naming the invalid key; unknown keys are rejected. */

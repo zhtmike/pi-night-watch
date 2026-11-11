@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type WatchConfig } from "../src/config.ts";
-import { advanceTask, latestSlug, resolveGoal, startTask, statusText, stopTask } from "../src/driver.ts";
+import { advanceTask, latestSlug, overlayText, resolveGoal, startTask, statusLine, statusText, stopTask } from "../src/driver.ts";
 import { manifestPath, taskDir, workerEventsPath, WatchError, appendDecision, appendVerdict, decisionsPath, verdictsPath } from "../src/manifest.ts";
 import { readManifest, writeManifest } from "../src/manifest.ts";
 import { check, finish } from "./harness.ts";
@@ -214,6 +214,64 @@ const past = new Date(Date.now() - 60_000).toISOString();
 		"status: decision chain with recommendation and unanswered",
 		st.includes("decision r1: a — fork? (worker recommended: a)") && st.includes("decision r1: unanswered — other?"),
 	);
+}
+
+// statusLine: one footer line while live, null at terminal.
+{
+	const { root, slug } = parkedTask("statusline live", "exit 0", future);
+	const line = statusLine(root, slug);
+	check("statusLine: WAITING footer with counts", line !== null && line.includes("WAITING") && line.includes("1 verdict") && line.includes("rounds 1/"));
+	const dir = taskDir(root, slug);
+	const mT = readManifest(manifestPath(dir));
+	mT.terminal = { state: "DONE", at: "t", note: "n" };
+	writeManifest(manifestPath(dir), mT);
+	check("statusLine: null at terminal", statusLine(root, slug) === null);
+}
+
+// onEventCmd: fired with slug/state/dir in env by whichever code writes the terminal state.
+{
+	const { root, slug } = parkedTask("onEventCmd done", "exit 0", past, { onEventCmd: "echo \"$NIGHTWATCH_SLUG $NIGHTWATCH_STATE $(basename \"$NIGHTWATCH_DIR\")\" >> events.log" });
+	const rep = advanceTask(root, slug, EXT);
+	const log = fs.readFileSync(path.join(root, "events.log"), "utf-8").trim();
+	check("onEventCmd: fired on DONE with env", rep.lines.some((l) => l.includes("onEventCmd fired")) && log === `${slug} DONE ${slug}`);
+}
+{
+	const { root, slug } = parkedTask("onEventCmd stopped", "exit 0", future, { onEventCmd: "echo \"$NIGHTWATCH_STATE\" >> events.log" });
+	await stopTask(root, slug);
+	const log = fs.readFileSync(path.join(root, "events.log"), "utf-8").trim();
+	check("onEventCmd: fired on STOPPED", log.includes("STOPPED"));
+}
+{
+	const { root, slug } = parkedTask("onEventCmd failure surfaced", "exit 0", past, { onEventCmd: "exit 3" });
+	const rep = advanceTask(root, slug, EXT);
+	check("onEventCmd: nonzero exit surfaced, terminal still written", rep.lines.some((l) => l.includes("onEventCmd exited 3")) && rep.lines[0].includes("DONE"));
+}
+
+// statusLine settling/decided branches.
+{
+	const { root, slug } = parkedTask("statusline settling", "exit 0", future);
+	const dir = taskDir(root, slug);
+	const mS = readManifest(manifestPath(dir));
+	mS.rounds[0].headStart = "";
+	writeManifest(manifestPath(dir), mS);
+	const vFile = verdictsPath(dir);
+	const noWait = fs.readFileSync(vFile, "utf-8").trim().split("\n").map((l) => { const v = JSON.parse(l); delete v.wait; return JSON.stringify(v); }).join("\n") + "\n";
+	fs.writeFileSync(vFile, noWait);
+	check("statusLine: settling when dead head and no wait", statusLine(root, slug)?.includes("settling") === true);
+	const mD = readManifest(manifestPath(dir));
+	mD.rounds[0].outcome = { what: "FAIL", sig: "x", note: "n" };
+	writeManifest(manifestPath(dir), mD);
+	check("statusLine: decided (not yet terminal)", statusLine(root, slug)?.includes("decided") === true);
+}
+
+// overlayText: status + task-wide usage + live-round tail, zero model tokens.
+{
+	const { root, slug } = parkedTask("overlay", "exit 0", past);
+	const before = overlayText(root, slug);
+	check("overlay: verdict chain + usage + tail present", before.includes("verdict r1: WAIT") && before.includes("usage:") && before.includes("Round 1 tail"));
+	advanceTask(root, slug, EXT);
+	const after = overlayText(root, slug);
+	check("overlay: terminal + PASS after advance", after.includes("TERMINAL: DONE") && after.includes("round 1: PASS"));
 }
 
 finish("driver");

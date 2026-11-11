@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { defineTool, type AgentToolResult, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { validateVerdictArgs, validateConsultArgs, validateDecisionArgs } from "./events.ts";
-import { advanceTask, latestSlug, parseStartArgs, resolveGoal, runConsultation, runReviewGate, startTask, statusText, stopTask } from "./driver.ts";
+import { advanceTask, latestSlug, overlayText, parseStartArgs, resolveGoal, runConsultation, runReviewGate, startTask, statusLine, statusText, stopTask } from "./driver.ts";
 
 const EXT_PATH = fileURLToPath(import.meta.url);
 const text = (s: string): AgentToolResult => ({ content: [{ type: "text", text: s }], details: {} });
@@ -106,7 +106,41 @@ const consultReviewerTool = defineTool({
 	},
 });
 
-const USAGE = "usage: /watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] [<goal>] | /watch status [slug] | /watch advance [slug] | /watch stop [slug]";
+const USAGE = "usage: /watch [slug] (inspector) | /watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] [<goal>] | /watch status [slug] | /watch advance [slug] | /watch stop [slug]";
+
+// --- statusbar (interactive sessions only) ------------------------------------------------------
+
+const STATUS_KEY = "night-watch";
+const STATUS_POLL_MS = 5_000;
+
+type SessionCtx = { cwd: string; hasUI: boolean; ui: { setStatus(key: string, text: string | undefined): void } };
+let sessionCtx: SessionCtx | null = null;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function statusBarTick(): void {
+	const ctx = sessionCtx;
+	if (ctx === null) return;
+	let line: string | null = null;
+	try {
+		line = statusLine(ctx.cwd, latestSlug(ctx.cwd));
+	} catch {
+		line = null; // no tasks yet or unreadable workspace — nothing to show this tick
+	}
+	ctx.ui.setStatus(STATUS_KEY, line === null ? undefined : line);
+}
+
+function armPolling(): void {
+	if (pollTimer === null && sessionCtx !== null && sessionCtx.hasUI) {
+		pollTimer = setInterval(statusBarTick, STATUS_POLL_MS);
+	}
+}
+
+function stopPolling(): void {
+	if (pollTimer !== null) {
+		clearInterval(pollTimer);
+		pollTimer = null;
+	}
+}
 
 export default function (pi: ExtensionAPI) {
 	const decider = process.env.NIGHTWATCH_DECIDER === "1";
@@ -128,8 +162,17 @@ export default function (pi: ExtensionAPI) {
 		return;
 	}
 
+	pi.on("session_start", (_event, ctx) => {
+		sessionCtx = { cwd: ctx.cwd, hasUI: ctx.hasUI, ui: ctx.ui };
+		armPolling();
+	});
+	pi.on("session_shutdown", () => {
+		stopPolling();
+		sessionCtx = null;
+	});
+
 	pi.registerCommand("watch", {
-		description: "Long-horizon worker/reviewer loop — /watch start|status|advance|stop",
+		description: "Long-horizon worker/reviewer loop — bare /watch inspects; start|status|advance|stop manage",
 		getArgumentCompletions: (arg: string) => {
 			const first = (arg.split(/\s+/)[0] ?? "").trim();
 			if (!arg.includes(" ")) {
@@ -155,13 +198,15 @@ export default function (pi: ExtensionAPI) {
 				} else if (cmd === "status") {
 					const t = statusText(ctx.cwd, slugArg ?? latestSlug(ctx.cwd));
 					ctx.ui.notify(t, "info");
-					if (ctx.hasUI) ctx.ui.setStatus("night-watch", t.split("\n").slice(0, 2).join(" · "));
 				} else if (cmd === "advance") {
 					const rep = advanceTask(ctx.cwd, slugArg ?? latestSlug(ctx.cwd), EXT_PATH);
 					ctx.ui.notify(rep.lines.join("\n"), "info");
 				} else if (cmd === "stop") {
 					const lines = await stopTask(ctx.cwd, slugArg ?? latestSlug(ctx.cwd));
 					ctx.ui.notify(lines.join("\n"), "info");
+				} else if (parts.length <= 1) {
+					// Bare /watch or /watch <slug>: the inspector — chains, rounds, live tail, usage. Zero model tokens.
+					ctx.ui.notify(overlayText(ctx.cwd, cmd === undefined ? latestSlug(ctx.cwd) : cmd), "info");
 				} else {
 					ctx.ui.notify(USAGE, "warning");
 				}
