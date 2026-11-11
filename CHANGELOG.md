@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — provenance repository field
+
+Identical to 0.2.0 plus one field: `package.json` now declares
+`repository.url`, which npm's sigstore provenance verification requires
+to match the OIDC token's repository claim. The v0.2.0 tag's publish
+was rejected E422 for exactly that missing field; npm never accepted
+0.2.0, and the protected tag is immutable, so 0.2.1 is the first
+published release of this line.
+
 ## 0.2.0 — unattended: waits, decisions, inspection
 
 A watch now carries long work through the night without a session open,
