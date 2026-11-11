@@ -21,16 +21,23 @@ const text = (s: string): AgentToolResult => ({ content: [{ type: "text", text: 
 const submitVerdictTool = defineTool({
 	name: "submit_verdict",
 	label: "Submit verdict",
-	description: "Submit the review verdict. Call exactly once, as your final act. passed: whether the goal is met; notes: what you verified and what remains (≤500 chars); evidence: commands you ran and what they showed.",
+	description:
+		"Submit the review verdict. Call exactly once, as your final act. passed: whether the goal is met; notes: what you verified and what remains (≤500 chars); evidence: commands you ran and what they showed; wait: {check_cmd, due_at} only with passed:false, when one external condition outside any worker's control is all that remains — the driver re-checks it and completes the round when it holds.",
 	parameters: Type.Object({
 		passed: Type.Boolean({ description: "True only if the goal is verifiably met" }),
 		notes: Type.String({ description: "Findings summary, ≤500 chars" }),
 		evidence: Type.Array(Type.String({ description: "A command and what it showed" })),
+		wait: Type.Optional(
+			Type.Object({
+				check_cmd: Type.String({ description: "Shell command that exits 0 once the awaited condition holds (≤500 chars)" }),
+				due_at: Type.String({ description: "Earliest recheck, ISO-8601 timestamp" }),
+			}),
+		),
 	}),
 	async execute(_toolCallId: string, params: unknown) {
 		const v = validateVerdictArgs(params);
 		if ("error" in v) return { content: [{ type: "text", text: `verdict rejected: ${v.error}. Call submit_verdict again with a valid shape.` }], details: {} };
-		return { content: [{ type: "text", text: `verdict recorded (passed=${v.passed}). You may now finish.` }], details: {} };
+		return { content: [{ type: "text", text: `verdict recorded (passed=${v.passed}${v.wait ? `, waiting until ${v.wait.due_at}` : ""}). You may now finish.` }], details: {} };
 	},
 });
 
@@ -48,7 +55,8 @@ const reviewGateTool = defineTool({
 		}
 		const verdict = await runReviewGate(dir, round, EXT_PATH);
 		const ev = verdict.evidence.length > 0 ? "\n" + verdict.evidence.map((e) => `- ${e}`).join("\n") : "";
-		return text(`REVIEWER VERDICT: ${verdict.passed ? "PASSED" : "REJECTED"}\n${verdict.notes}${ev}`);
+		const wait = verdict.wait ? ` — waiting until ${verdict.wait.due_at} on \`${verdict.wait.check_cmd}\`; finish this round, the driver re-checks` : "";
+		return text(`REVIEWER VERDICT: ${verdict.passed ? "PASSED" : "REJECTED"}${wait}\n${verdict.notes}${ev}`);
 	},
 });
 

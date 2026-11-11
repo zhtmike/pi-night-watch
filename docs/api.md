@@ -18,7 +18,9 @@ Creates a task (atomic manifest under `.pi/night-watch/<slug>/`) and spawns roun
 
 Unknown or valueless flags are rejected, never silently folded into the goal.
 
-The goal is re-stated verbatim in every round brief, so anything written into it — an approval statement ("I have already human approved; do it yourself"), constraints, links — reaches every round unchanged. The tool adds no approval machinery of its own: a worker whose environment has approval rules reads them from the goal; a worker with none simply proceeds. Actions beyond the goal's scope (merging, pushing to protected refs) are report items at task end, never auto-executed.
+The goal is re-stated verbatim in every round brief, so anything written into it — an approval statement ("I have already human approved; do it yourself"), constraints, links, working style — reaches every round unchanged. The tool adds no approval machinery of its own: a worker whose environment has approval rules reads them from the goal; a worker with none simply proceeds. Actions beyond the goal's scope (merging, pushing to protected refs) are report items at task end, never auto-executed.
+
+Briefs carry state only — goal, round, outcomes, reviewer findings, wait bookkeeping. All methodology and instruction prose belongs in the goal (it reaches both roles) or in the ambient skills; the tools' own descriptions state their call contracts. A goal with an external condition should say so and instruct the worker to gate as soon as its own part is done — the reviewer can then park on it (`wait`), which is far cheaper than a worker polling it into its round leash.
 
 ### `/watch status [slug]`
 
@@ -26,18 +28,18 @@ Renders the derived state: config summary, terminal state, per-round state (PEND
 
 ### `/watch advance [slug]`
 
-The stateless driver step. Decides every settled-but-undecided round, applies terminal rules, and spawns the next round with write-ahead intent. Idempotent; single-flight (a live concurrent advance is refused; a stale claim is taken over).
+The stateless driver step. Decides every settled-but-undecided round, applies terminal rules, and spawns the next round with write-ahead intent. Idempotent; single-flight (a live concurrent advance is refused; a stale claim is taken over). A parked round reports `WAITING` with its next check time and spawns nothing.
 
 ### `/watch stop [slug]`
 
-TERM to the round head + TERM to its process group, KILL to the group after `killGraceSec`. Terminal state `STOPPED`. Holds the single-flight lock while stopping.
+TERM to the round head + TERM to its process group, KILL to the group after `killGraceSec`. Terminal state `STOPPED`. Holds the single-flight lock while stopping. A WAITING round has nothing to kill — the stop simply records `STOPPED` and ends the park.
 
 ## Tools
 
 Roles are env-gated; each child sees only its own tool.
 
 - `review_gate` (worker) — spawns a fresh-context reviewer child, parses its verdict, appends it to the verdict ledger, returns it as the tool result. No arguments.
-- `submit_verdict` (reviewer) — `passed: boolean`, `notes: string ≤ 500`, `evidence: string[]` (each a command and what it showed). Rejected shapes return an error the reviewer can retry.
+- `submit_verdict` (reviewer) — `passed: boolean`, `notes: string ≤ 500`, `evidence: string[]` (each a command and what it showed), and optionally `wait: {check_cmd ≤ 500 chars, due_at ISO-8601}` — only with `passed:false`, when one external condition outside any worker's control (a CI run, a deploy, a timer) is all that remains. Rejected shapes return an error the reviewer can retry.
 
 ## Configuration
 
@@ -58,6 +60,10 @@ Roles are env-gated; each child sees only its own tool.
 | `criteriaTimeoutMs` | `300000` | Timeout for the criteria command |
 | `lockGraceMs` | `60000` | Grace before a torn single-flight lock may be taken over |
 | `preflightTimeoutMs` | `15000` | Timeout for the child-binary preflight check |
+| `pollJitterMs` | `5000` | Upper bound on the kicker bin's random pre-action sleep |
+| `waitRetryBaseMs` | `60000` | First wait-check retry delay; retries back off `2^(n-1)` from here |
+| `waitRetryMaxMs` | `900000` | Cap on any single wait-check retry delay |
+| `waitMaxAttempts` | `5` | Nonzero checks a parked round tolerates before `wait-exhausted` |
 | `criteria` | — | Shell command run by the driver; PASS requires exit 0. Unset = verdict-only mode (weaker) |
 
 ### Sizing long tasks
@@ -86,11 +92,49 @@ The round leash bounds *everything* the round starts: sub-agents or lanes spawne
 
 A round is decided exactly once, then immutable in the manifest:
 
-- **PASS** ⇔ the last verdict for the round is `passed:true` **and** the criteria command (if configured) exits 0 when run by the driver.
-- **FAIL** — reviewer rejected; or verdict pass with criteria failing; or the round settled without calling `review_gate`; or the tamper guard tripped (criteria files changed or unreadable since start).
+- **PASS** ⇔ the last verdict for the round is `passed:true` **and** the criteria command (if configured) exits 0 when run by the driver — or a wait satisfied (below).
+- **FAIL** — reviewer rejected; or verdict pass with criteria failing; or the round settled without calling `review_gate`; or the tamper guard tripped (criteria files changed or unreadable since start); or a wait exhausted / wait satisfied with criteria red.
 - **CRASHED** — the round head died before the worker settled. The next round's brief is seeded from the crashed round's event stream (inspect, never replay).
 
 Terminal states: `DONE` (first PASS wins), `HALT_STAGNANT` (identical failure signature twice — two crashes share a signature), `HALT_BUDGET` (maxRounds exhausted), `HALT_ERROR` (spawn failure), `STOPPED`.
+
+## Waits
+
+A rejected verdict may carry `wait {check_cmd, due_at}`: the reviewer attests the goal is met once an external condition holds, and names a shell command that exits 0 when it does. The round then **parks** instead of failing:
+
+- `WAITING` is derived, never stored: round settled + last verdict carries a wait + now before the round's next check time ⇒ `advance` reports WAITING and spawns nothing. `maxRounds` counts worker rounds only — waits and retries never spend one.
+- At/after the check time the driver runs `check_cmd` itself (`criteriaTimeoutMs`; the tamper guard applies as in any decide):
+  - **exit 0** — the conditional attestation is satisfied: the task's own criteria (if configured) also runs, as for any PASS. Criteria green or none ⇒ `PASS {sig: wait-ok}` — the task may go terminal DONE here, no confirmation round. Criteria red ⇒ `FAIL {sig: wait-criteria-red}` and the next round spawns.
+  - **nonzero** — retry in place, never a worker round per poll: the round stays parked and re-checks on a backing-off schedule (`waitRetryBaseMs × 2^(n-1)`, capped at `waitRetryMaxMs`; `waitAttempts`/`waitNextCheckAt` on the round record are the only stored wait state). After `waitMaxAttempts` nonzero checks ⇒ `FAIL {sig: wait-exhausted}`; the next round's brief states the park, the failure count, and the choice: keep waiting with a fresh `due_at`, or change course. Stagnation then applies across rounds as usual.
+- The worker sees the park as its gate result (`REJECTED — waiting until <due_at> on <check_cmd>`) and settles; a round parks on at most one wait, and a new wait comes from the next round's reviewer.
+- Known weakness: in verdict-only mode (no `criteria`) a satisfied check alone completes the round on a possibly-stale attestation — tasks that park on waits should configure `criteria`.
+
+## Kicker bin
+
+`night-watch advance [dir] [slug]` · `night-watch status [dir] [slug]` — a plain-node bin shipped with the package (`node_modules/.bin/night-watch` when installed). `dir` defaults to the cwd, `slug` to the latest task by mtime. Each invocation is stateless — the same single-flight lock and write-ahead as `/watch advance`; a missed schedule collapses into one catch-up advance. `advance` sleeps a random `0..pollJitterMs` first so machines do not poll in lockstep.
+
+No scheduler ships with it. Recipes, both firing often enough that `waitRetryMaxMs` granularity is respected (e.g. every minute):
+
+```cron
+# crontab -e — advance every minute while the machine is up
+* * * * * /usr/local/bin/night-watch advance /path/to/repo >> /path/to/repo/.pi/night-watch/kicker.log 2>&1
+```
+
+```xml
+<!-- ~/Library/LaunchAgents/com.zhtmike.night-watch.plist -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.zhtmike.night-watch</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/local/bin/night-watch</string>
+    <string>advance</string>
+    <string>/path/to/repo</string>
+  </array>
+  <key>StartInterval</key><integer>60</integer>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+```
+
+The check commands run with your user's credentials and environment — only point `check_cmd` at commands you trust, exactly as with `criteria`.
 
 ## Mechanics
 
@@ -99,4 +143,4 @@ Terminal states: `DONE` (first PASS wins), `HALT_STAGNANT` (identical failure si
 - **Write-ahead intent** — the round record exists in the manifest before spawn. A PENDING round that already has an event stream was spawned but never recorded: it is decided CRASHED from that stream, never respawned.
 - **Atomic writes** — exclusive-create tmp → write → fsync → rename → dir-fsync; the rename is the commit point. Verdicts and events are newline-terminated append-only; a torn trailing line is truncation and skipped.
 - **Single-flight lock** — `advance.lock` claimed O_EXCL with pid + `ps -o lstart=` start time; same-host stale claims are taken over via rename (a lost takeover race retries), foreign hosts fail closed, unreadable claims only past `lockGraceMs`. `stop` holds the same lock so a racing advance cannot clobber `STOPPED`.
-- **Crash recovery** — loss is bounded to ≤ one round: everything that reached an event stream is on disk, and the next round's brief carries the crashed round's last words with a verify-before-acting instruction.
+- **Crash recovery** — loss is bounded to ≤ one round: everything that reached an event stream is on disk, and the next round's brief carries the crashed round's last words.

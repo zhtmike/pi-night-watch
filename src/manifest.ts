@@ -15,6 +15,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { WatchConfig } from "./config.ts";
+import { normalizeConfig } from "./config.ts";
 
 export class WatchError extends Error {}
 
@@ -67,6 +68,9 @@ export interface RoundRec {
 	spawnedAt: string | null;
 	endedAt: string | null;
 	outcome: RoundOutcome | null;
+	/** Wait-park bookkeeping — the only stored wait state; absent before the first check run. */
+	waitAttempts?: number;
+	waitNextCheckAt?: string | null;
 }
 
 export interface Verdict {
@@ -75,6 +79,8 @@ export interface Verdict {
 	passed: boolean;
 	notes: string;
 	evidence: string[];
+	/** A rejected verdict may park the round on an external condition instead of failing it. */
+	wait?: { check_cmd: string; due_at: string } | null;
 }
 
 export interface Manifest {
@@ -96,6 +102,8 @@ export interface Manifest {
 export function readManifest(file: string): Manifest {
 	const m = JSON.parse(fs.readFileSync(file, "utf-8")) as Manifest;
 	if (m.version !== 1) throw new WatchError(`${file}: unsupported version ${m.version}`);
+	// Snapshots as old as the manifest may predate config keys — defaults fill on read so new paths never see undefined.
+	m.config = normalizeConfig(m.config, `${file} (config snapshot)`);
 	return m;
 }
 

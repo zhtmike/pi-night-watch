@@ -7,8 +7,9 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { advanceTask, latestSlug, resolveGoal, startTask } from "../src/driver.ts";
-import { manifestPath, taskDir, workerEventsPath, WatchError } from "../src/manifest.ts";
+import { type WatchConfig } from "../src/config.ts";
+import { advanceTask, latestSlug, resolveGoal, startTask, stopTask } from "../src/driver.ts";
+import { manifestPath, taskDir, workerEventsPath, WatchError, appendVerdict, verdictsPath } from "../src/manifest.ts";
 import { readManifest, writeManifest } from "../src/manifest.ts";
 import { check, finish } from "./harness.ts";
 
@@ -17,6 +18,23 @@ fs.writeFileSync(path.join(repo, "spec.txt"), "spec v1\n");
 const EXT = "/dev/null"; // no test path ever spawns a worker
 fs.mkdirSync(path.join(repo, ".pi", "night-watch"), { recursive: true });
 fs.writeFileSync(path.join(repo, ".pi", "night-watch", "config.json"), JSON.stringify({ piBin: "/nonexistent/pi-bin" }));
+
+/** A parked round fixture: task started, round 1 settled with a wait verdict, head dead. */
+function parkedTask(goal: string, checkCmd: string, dueAt: string, cfgExtra: Record<string, unknown> = {}): { root: string; slug: string } {
+	const dir0 = path.join(os.tmpdir(), `nw-wait-${Math.random().toString(36).slice(2)}`);
+	fs.mkdirSync(path.join(dir0, ".pi", "night-watch"), { recursive: true });
+	fs.writeFileSync(path.join(dir0, ".pi", "night-watch", "config.json"), JSON.stringify({ piBin: "/nonexistent/pi-bin", pollJitterMs: 1, waitRetryBaseMs: 5_000, waitRetryMaxMs: 6_000, waitMaxAttempts: 2, ...cfgExtra }));
+	const { slug } = startTask(dir0, goal, {});
+	const dir = taskDir(dir0, slug);
+	const m = readManifest(manifestPath(dir));
+	m.rounds[0].headPid = 999_999; // dead
+	m.rounds[0].headStart = "";
+	writeManifest(manifestPath(dir), m);
+	fs.mkdirSync(path.dirname(workerEventsPath(dir, 1)), { recursive: true });
+	fs.writeFileSync(workerEventsPath(dir, 1), JSON.stringify({ type: "agent_settled" }) + "\n");
+	appendVerdict(verdictsPath(dir), { at: new Date().toISOString(), round: 1, passed: false, notes: "CI pending", evidence: ["gh run view → in_progress"], wait: { check_cmd: checkCmd, due_at: dueAt } });
+	return { root: dir0, slug };
+}
 
 // HALT_ERROR: a bad binary fails the preflight at spawn time — never a real spawn.
 const { slug: s1 } = startTask(repo, "goal one", { criteriaFiles: ["spec.txt"] });
@@ -91,5 +109,98 @@ try {
 const { slug: gf } = startTask(repo, resolveGoal(repo, { goalFile: "prompt.md" }), {});
 const mGf = readManifest(manifestPath(taskDir(repo, gf)));
 check("goal from file lands verbatim in manifest", mGf.goal.includes("\n") && mGf.goal.startsWith("Since https://example.com/pr/878"));
+
+// --- wait lifecycle -----------------------------------------------------------------------------
+
+const future = new Date(Date.now() + 3_600_000).toISOString();
+const past = new Date(Date.now() - 60_000).toISOString();
+
+// Parked, not due: WAITING reported, nothing decided, nothing spawned.
+{
+	const { root, slug } = parkedTask("wait not due", "exit 0", future);
+	const rep = advanceTask(root, slug, EXT);
+	const m = readManifest(manifestPath(taskDir(root, slug)));
+	check("not due ⇒ WAITING, no decide, no spawn", rep.lines[0].includes("WAITING") && m.rounds.length === 1 && m.rounds[0].outcome === null && m.terminal === null);
+}
+
+// Due + check green (verdict-only): PASS wait-ok → terminal DONE, no confirmation round.
+{
+	const { root, slug } = parkedTask("wait satisfied", "exit 0", past);
+	const rep = advanceTask(root, slug, EXT);
+	const m = readManifest(manifestPath(taskDir(root, slug)));
+	check("check green ⇒ PASS wait-ok → DONE", m.rounds[0].outcome?.what === "PASS" && m.rounds[0].outcome?.sig === "wait-ok" && m.terminal?.state === "DONE" && rep.lines[0].includes("DONE"));
+}
+
+// Due + check green but criteria red: FAIL wait-criteria-red.
+{
+	const { root, slug } = parkedTask("wait but criteria red", "exit 0", past, { criteria: "exit 7", maxRounds: 1 });
+	advanceTask(root, slug, EXT);
+	const m = readManifest(manifestPath(taskDir(root, slug)));
+	check("check green + criteria red ⇒ FAIL wait-criteria-red", m.rounds[0].outcome?.sig === "wait-criteria-red" && m.rounds[0].outcome?.note.includes("exited 7"));
+}
+
+// Due + check nonzero: retry in place — attempts recorded, backoff slot stored, round NOT decided, no respawn.
+{
+	const { root, slug } = parkedTask("wait retry in place", "exit 3", past);
+	const rep = advanceTask(root, slug, EXT);
+	const m = readManifest(manifestPath(taskDir(root, slug)));
+	check("check failed ⇒ retry parked with backoff", rep.lines[0].includes("WAITING") && m.rounds[0].waitAttempts === 1 && typeof m.rounds[0].waitNextCheckAt === "string" && m.rounds[0].outcome === null && m.rounds.length === 1);
+	const again = advanceTask(root, slug, EXT);
+	check("backoff window holds the park", again.lines[0].includes("WAITING") && readManifest(manifestPath(taskDir(root, slug))).rounds[0].waitAttempts === 1);
+	// Force the retry slot past due: second failure exhausts waitMaxAttempts=2 ⇒ FAIL wait-exhausted, next round write-ahead.
+	const dir = taskDir(root, slug);
+	const m2 = readManifest(manifestPath(dir));
+	m2.rounds[0].waitNextCheckAt = past;
+	writeManifest(manifestPath(dir), m2);
+	const rep3 = advanceTask(root, slug, EXT);
+	const m3 = readManifest(manifestPath(dir));
+	check("exhaustion ⇒ FAIL wait-exhausted + next round", m3.rounds[0].outcome?.sig === "wait-exhausted" && m3.rounds[0].outcome?.note === "check_cmd failed 2 times" && m3.rounds.length === 2 && rep3.lines.some((l) => l.includes("HALT_ERROR")));
+}
+
+// Tamper while parked: the guard decides before any check runs.
+{
+	const dir0 = path.join(os.tmpdir(), `nw-tamper-${Math.random().toString(36).slice(2)}`);
+	fs.mkdirSync(path.join(dir0, ".pi", "night-watch"), { recursive: true });
+	fs.writeFileSync(path.join(dir0, "spec.txt"), "spec v1\n");
+	fs.writeFileSync(path.join(dir0, ".pi", "night-watch", "config.json"), JSON.stringify({ piBin: "/nonexistent/pi-bin", pollJitterMs: 1 }));
+	const { slug } = startTask(dir0, "tamper while parked", { criteriaFiles: ["spec.txt"] });
+	const dir = taskDir(dir0, slug);
+	const m = readManifest(manifestPath(dir));
+	m.rounds[0].headPid = 999_999;
+	m.rounds[0].headStart = "";
+	writeManifest(manifestPath(dir), m);
+	fs.mkdirSync(path.dirname(workerEventsPath(dir, 1)), { recursive: true });
+	fs.writeFileSync(workerEventsPath(dir, 1), JSON.stringify({ type: "agent_settled" }) + "\n");
+	appendVerdict(verdictsPath(dir), { at: new Date().toISOString(), round: 1, passed: false, notes: "CI pending", evidence: [], wait: { check_cmd: "exit 0", due_at: past } });
+	fs.rmSync(path.join(dir0, "spec.txt"));
+	advanceTask(dir0, slug, EXT);
+	check("tamper while parked ⇒ FAIL tamper, check never ran", readManifest(manifestPath(dir)).rounds[0].outcome?.sig === "tamper");
+}
+
+// Stopping a WAITING task: nothing to kill, but the park must not outlive the user's stop.
+{
+	const { root, slug } = parkedTask("stop while parked", "exit 0", future);
+	const lines = await stopTask(root, slug);
+	const m = readManifest(manifestPath(taskDir(root, slug)));
+	check("stop while WAITING ⇒ terminal STOPPED", m.terminal?.state === "STOPPED" && lines[0].includes("WAITING"));
+}
+
+// 0.1.0 upgrade path: a manifest whose config snapshot predates the wait keys must
+// park and retry on defaults, never throw on the first nonzero check.
+{
+	const { root, slug } = parkedTask("old snapshot retries on defaults", "exit 3", past);
+	const dir = taskDir(root, slug);
+	const mOld = readManifest(manifestPath(dir));
+	const { pollJitterMs, waitRetryBaseMs, waitRetryMaxMs, waitMaxAttempts, ...snapshot } = mOld.config;
+	void pollJitterMs;
+	void waitRetryBaseMs;
+	void waitRetryMaxMs;
+	void waitMaxAttempts;
+	mOld.config = snapshot as unknown as WatchConfig;
+	writeManifest(manifestPath(dir), mOld);
+	const rep = advanceTask(root, slug, EXT);
+	const mNew = readManifest(manifestPath(dir));
+	check("old snapshot: nonzero check parks on defaults, no throw", rep.lines[0].includes("WAITING") && mNew.rounds[0].waitAttempts === 1 && typeof mNew.rounds[0].waitNextCheckAt === "string");
+}
 
 finish("driver");

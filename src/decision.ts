@@ -4,7 +4,7 @@
  */
 
 import { createHash } from "node:crypto";
-import type { RoundOutcome, Verdict } from "./manifest.ts";
+import type { RoundOutcome, RoundRec, Verdict } from "./manifest.ts";
 
 export interface DecideInput {
 	/** criteriaFiles hash changed (or became unreadable) since task start */
@@ -60,4 +60,30 @@ export const sha256 = (s: string): string => createHash("sha256").update(s).dige
 export function firstLine(s: string): string {
 	const i = s.indexOf("\n");
 	return (i === -1 ? s : s.slice(0, i)).trim();
+}
+
+// --- waits --------------------------------------------------------------------------------------
+
+export interface WaitState {
+	check_cmd: string;
+	/** When the next driver-side check may run: due_at until the first check, the stored retry slot after. */
+	nextCheckAt: string;
+	/** Nonzero checks so far; the round FAILs as wait-exhausted at config.waitMaxAttempts. */
+	attempts: number;
+}
+
+/** A settled round parks when its last verdict carries a wait; null otherwise. Pure derivation from the round record + verdict. */
+export function roundWaitState(round: RoundRec, lastVerdict: Verdict | null): WaitState | null {
+	if (lastVerdict === null || !lastVerdict.wait || lastVerdict.passed) return null;
+	return {
+		check_cmd: lastVerdict.wait.check_cmd,
+		nextCheckAt: round.waitNextCheckAt ?? lastVerdict.wait.due_at,
+		attempts: round.waitAttempts ?? 0,
+	};
+}
+
+/** Delay before wait-check retry n (1-based): base × 2^(n-1), capped. */
+export function waitRetryDelayMs(retryN: number, baseMs: number, capMs: number): number {
+	if (retryN < 1 || baseMs < 1 || capMs < 1) throw new Error(`waitRetryDelayMs: invalid arguments (${retryN}, ${baseMs}, ${capMs})`);
+	return Math.min(baseMs * 2 ** (retryN - 1), capMs);
 }

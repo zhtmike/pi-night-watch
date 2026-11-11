@@ -35,6 +35,14 @@ export interface WatchConfig {
 	lockGraceMs: number;
 	/** Timeout for the child-binary preflight check (ms). */
 	preflightTimeoutMs: number;
+	/** Upper bound on the random pre-action sleep in the kicker bin (ms). */
+	pollJitterMs: number;
+	/** First wait-check retry delay; retries back off 2^(n-1) from here (ms). */
+	waitRetryBaseMs: number;
+	/** Cap on any single wait-check retry delay (ms). */
+	waitRetryMaxMs: number;
+	/** Nonzero checks a parked round tolerates before FAIL wait-exhausted. */
+	waitMaxAttempts: number;
 	/** Shell command run by the driver; PASS requires exit 0. Unset = verdict-only mode. */
 	criteria?: string;
 }
@@ -49,9 +57,13 @@ export const DEFAULT_WATCH_CONFIG: WatchConfig = {
 	criteriaTimeoutMs: 300_000,
 	lockGraceMs: 60_000,
 	preflightTimeoutMs: 15_000,
+	pollJitterMs: 5_000,
+	waitRetryBaseMs: 60_000,
+	waitRetryMaxMs: 900_000,
+	waitMaxAttempts: 5,
 };
 
-const INT_KEYS = ["maxRounds", "roundDeadlineMin", "reviewerDeadlineMin", "killGraceSec", "criteriaTimeoutMs", "lockGraceMs", "preflightTimeoutMs"] as const;
+const INT_KEYS = ["maxRounds", "roundDeadlineMin", "reviewerDeadlineMin", "killGraceSec", "criteriaTimeoutMs", "lockGraceMs", "preflightTimeoutMs", "pollJitterMs", "waitRetryBaseMs", "waitRetryMaxMs", "waitMaxAttempts"] as const;
 const STR_KEYS = ["workerModel", "reviewerModel", "criteria", "piBin", "timeoutBin"] as const;
 const THINKING_KEYS = ["workerThinkingLevel", "reviewerThinkingLevel"] as const;
 
