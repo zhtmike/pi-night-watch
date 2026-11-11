@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { WatchError, appendDecision, readDecisions, readManifest, readVerdicts, writeManifest, type Manifest } from "../src/manifest.ts";
+import { WatchError, readManifest, readVerdicts, writeManifest, type Manifest } from "../src/manifest.ts";
 import { check, finish } from "./harness.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nw-manifest-"));
@@ -11,7 +11,7 @@ const m: Manifest = {
 	slug: "t",
 	goal: "g",
 	reviewRubric: null,
-	config: { piBin: "pi", timeoutBin: "timeout", maxRounds: 2, roundDeadlineMin: 3, reviewerDeadlineMin: 4, killGraceSec: 5, criteriaTimeoutMs: 6, lockGraceMs: 7, preflightTimeoutMs: 8, pollJitterMs: 9, waitRetryBaseMs: 10, waitRetryMaxMs: 11, waitMaxAttempts: 12 },
+	config: { piBin: "pi", timeoutBin: "timeout", maxRounds: 2, roundDeadlineMin: 3, reviewerDeadlineMin: 4, killGraceSec: 5, criteriaTimeoutMs: 6, lockGraceMs: 7, preflightTimeoutMs: 8, pollJitterMs: 9 },
 	criteriaFiles: [],
 	criteriaHash: "",
 	owner: { host: "h", startedAt: "t" },
@@ -25,7 +25,7 @@ check("no tmp leftovers", fs.readdirSync(path.dirname(file)).every((f) => !f.inc
 const old = { ...m, config: { piBin: "pi", timeoutBin: "timeout", maxRounds: 2, roundDeadlineMin: 3, reviewerDeadlineMin: 4, killGraceSec: 5, criteriaTimeoutMs: 6, lockGraceMs: 7, preflightTimeoutMs: 8 } } as unknown as Manifest;
 const oldFile = file.replace("manifest.json", "old.json");
 writeManifest(oldFile, old);
-check("old config snapshot gains new-key defaults on read", readManifest(oldFile).config.waitRetryBaseMs === 60_000 && readManifest(oldFile).config.waitMaxAttempts === 5);
+check("old config snapshot gains new-key defaults on read", readManifest(oldFile).config.pollJitterMs === 5_000);
 fs.writeFileSync(file.replace("manifest.json", "bad.json"), '{"version":2}');
 try {
 	readManifest(file.replace("manifest.json", "bad.json"));
@@ -43,11 +43,4 @@ try {
 } catch {
 	check("verdicts: mid-file corruption throws", true);
 }
-const dFile = path.join(tmp, "d.jsonl");
-const dec = { at: "t", round: 2, question: "q", options: ["a", "b"], recommendation: "a", choice: "a", reasoning: "r" };
-appendDecision(dFile, dec);
-appendDecision(dFile, { ...dec, choice: null, reasoning: "DECIDER_OUTPUT_UNPARSEABLE" });
-fs.appendFileSync(dFile, '{"torn');
-check("decisions: append + read + torn tail", readDecisions(dFile).length === 2 && readDecisions(dFile)[1].choice === null);
-check("decisions: absent file is empty", readDecisions(path.join(tmp, "none.jsonl")).length === 0);
 finish("manifest");

@@ -1,4 +1,4 @@
-import { VERDICT_NOTES_MAX, parseEvents, validateConsultArgs, validateDecisionArgs, validateVerdictArgs } from "../src/events.ts";
+import { VERDICT_NOTES_MAX, parseEvents, validateVerdictArgs } from "../src/events.ts";
 import { check, finish } from "./harness.ts";
 
 const ev = (t: string, extra: Record<string, unknown> = {}) => JSON.stringify({ type: t, ...extra });
@@ -28,32 +28,7 @@ check("validate: truncates notes at cap", !("error" in good) && good.notes.lengt
 check("validate: rejects non-bool passed", "error" in validateVerdictArgs({ passed: "yes", notes: "x", evidence: [] }));
 check("validate: rejects non-string evidence", "error" in validateVerdictArgs({ passed: true, notes: "x", evidence: [1] }));
 
-const wv = validateVerdictArgs({ passed: false, notes: "CI pending", evidence: ["gh run view → in_progress"], wait: { check_cmd: "gh run watch && exit 0", due_at: "2026-11-11T12:00:00Z" } });
-check("validate: wait round-trips", !("error" in wv) && wv.wait?.check_cmd === "gh run watch && exit 0" && wv.wait.due_at === "2026-11-11T12:00:00Z");
-check("validate: wait rejected on a passing verdict", "error" in validateVerdictArgs({ passed: true, notes: "x", evidence: [], wait: { check_cmd: "true", due_at: "2026-11-11T12:00:00Z" } }));
-check("validate: wait check_cmd cap", "error" in validateVerdictArgs({ passed: false, notes: "x", evidence: [], wait: { check_cmd: "x".repeat(501), due_at: "2026-11-11T12:00:00Z" } }));
-check("validate: wait check_cmd empty", "error" in validateVerdictArgs({ passed: false, notes: "x", evidence: [], wait: { check_cmd: "", due_at: "2026-11-11T12:00:00Z" } }));
-check("validate: wait due_at must be ISO-8601", "error" in validateVerdictArgs({ passed: false, notes: "x", evidence: [], wait: { check_cmd: "true", due_at: "tomorrow" } }) && "error" in validateVerdictArgs({ passed: false, notes: "x", evidence: [], wait: { check_cmd: "true", due_at: "March 1, 2030" } }));
-check("validate: wait must be an object", "error" in validateVerdictArgs({ passed: false, notes: "x", evidence: [], wait: "later" }));
-check("validate: wait needs both fields", "error" in validateVerdictArgs({ passed: false, notes: "x", evidence: [], wait: { check_cmd: "true" } }));
-const noWait = validateVerdictArgs({ passed: false, notes: "x", evidence: [] });
-check("validate: no wait still valid", !("error" in noWait) && noWait.wait === undefined);
-
-// --- decisions ---
-const ask = validateConsultArgs({ question: "Tabs or spaces?", options: ["tabs", "spaces"], recommendation: "tabs — this repo already uses them" });
-check("consult: valid ask round-trips", !("error" in ask) && ask.question === "Tabs or spaces?" && ask.options.length === 2 && ask.recommendation === "tabs — this repo already uses them");
-check("consult: recommendation optional", (() => { const a = validateConsultArgs({ question: "q", options: ["a", "b"] }); return !("error" in a) && a.recommendation === null; })());
-check("consult: question cap", "error" in validateConsultArgs({ question: "x".repeat(501), options: ["a", "b"] }));
-check("consult: too few options", "error" in validateConsultArgs({ question: "q", options: ["only"] }));
-check("consult: wide asks are the asker's problem", (() => { const a = validateConsultArgs({ question: "q", options: Array.from({ length: 12 }, (_, i) => `o${i}`) }); return !("error" in a) && a.options.length === 12; })());
-check("consult: empty option rejected", "error" in validateConsultArgs({ question: "q", options: ["a", ""] }));
-
-const dec = validateDecisionArgs({ choice: "formal — the conventional default", reasoning: "r".repeat(600) });
-check("decision: recorded verbatim + reasoning truncated", !("error" in dec) && dec.choice === "formal — the conventional default" && dec.reasoning.length === 500);
-check("decision: shape errors", "error" in validateDecisionArgs({ reasoning: "r" }) && "error" in validateDecisionArgs({ choice: "a" }) && "error" in validateDecisionArgs("x"));
-check("consult: duplicate options are the asker's problem, not ours", !("error" in validateConsultArgs({ question: "q", options: ["a", "a"] })));
-const dStream = [ev("tool_execution_start", { toolName: "submit_decision", args: { choice: "tabs", reasoning: "r" } }), ev("agent_settled", { aborted: false })].join("\n") + "\n";
-check("parseEvents: decision calls extracted", parseEvents(dStream).decisionCalls.length === 1 && parseEvents(dStream).verdictCalls.length === 0);
+const dStream = [ev("tool_execution_start", { toolName: "bash", args: { command: "ls" } }), ev("agent_settled", { aborted: false })].join("\n") + "\n";
 const uStream =
 	[
 		ev("message_update", { usage: { totalTokens: 1200, cost: { total: 0.01 } } }),

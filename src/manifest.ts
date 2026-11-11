@@ -3,12 +3,10 @@
  *
  *   .pi/night-watch/<slug>/manifest.json          the only stored state
  *   .pi/night-watch/<slug>/verdicts.jsonl         append-only reviewer verdicts
- *   .pi/night-watch/<slug>/decisions.jsonl        append-only decision consultations
  *   .pi/night-watch/<slug>/advance.lock           single-flight claim
  *   .pi/night-watch/<slug>/rounds/<n>/brief.md    write-ahead round brief
  *   .pi/night-watch/<slug>/rounds/<n>/worker.events.jsonl
  *   .pi/night-watch/<slug>/rounds/<n>/review-<k>-<a>.events.jsonl
- *   .pi/night-watch/<slug>/rounds/<n>/decision-<k>-<a>.events.jsonl
  *
  * Round outcomes are decided exactly once and then immutable; everything else
  * is derived from manifest + events + pids.
@@ -39,9 +37,6 @@ export const workerEventsPath = (dir: string, round: number): string => path.joi
 export const reviewerEventsPath = (dir: string, round: number, k: number, attempt: number): string => path.join(roundDir(dir, round), `review-${k}-${attempt}.events.jsonl`);
 export const roundErrPath = (dir: string, round: number, stem: string): string => path.join(roundDir(dir, round), `${stem}.err`);
 export const reviewerBriefPath = (dir: string, round: number, k: number, attempt: number): string => path.join(roundDir(dir, round), `review-${k}-${attempt}.brief.md`);
-export const decisionsPath = (dir: string): string => path.join(dir, "decisions.jsonl");
-export const decisionEventsPath = (dir: string, round: number, k: number, attempt: number): string => path.join(roundDir(dir, round), `decision-${k}-${attempt}.events.jsonl`);
-export const decisionBriefPath = (dir: string, round: number, k: number, attempt: number): string => path.join(roundDir(dir, round), `decision-${k}-${attempt}.brief.md`);
 
 export function slugify(goal: string): string {
 	const base = goal
@@ -73,9 +68,6 @@ export interface RoundRec {
 	spawnedAt: string | null;
 	endedAt: string | null;
 	outcome: RoundOutcome | null;
-	/** Wait-park bookkeeping — the only stored wait state; absent before the first check run. */
-	waitAttempts?: number;
-	waitNextCheckAt?: string | null;
 }
 
 export interface Verdict {
@@ -84,19 +76,6 @@ export interface Verdict {
 	passed: boolean;
 	notes: string;
 	evidence: string[];
-	/** A rejected verdict may park the round on an external condition instead of failing it. */
-	wait?: { check_cmd: string; due_at: string } | null;
-}
-
-/** One consultation and its answer; choice null = no parseable answer after the repair retry. */
-export interface Decision {
-	at: string;
-	round: number;
-	question: string;
-	options: string[];
-	recommendation: string | null;
-	choice: string | null;
-	reasoning: string;
 }
 
 export interface Manifest {
@@ -149,10 +128,6 @@ export function readVerdicts(file: string): Verdict[] {
 	return readLedger<Verdict>(file);
 }
 
-export function readDecisions(file: string): Decision[] {
-	return readLedger<Decision>(file);
-}
-
 /** Newline-terminated append-only ledger; a torn trailing line is truncation (skipped), anything else throws. */
 function readLedger<T>(file: string): T[] {
 	if (!fs.existsSync(file)) return [];
@@ -171,8 +146,4 @@ function readLedger<T>(file: string): T[] {
 
 export const appendVerdict = (file: string, v: Verdict): void => {
 	fs.appendFileSync(file, JSON.stringify(v) + "\n");
-};
-
-export const appendDecision = (file: string, d: Decision): void => {
-	fs.appendFileSync(file, JSON.stringify(d) + "\n");
 };

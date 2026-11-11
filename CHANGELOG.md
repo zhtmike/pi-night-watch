@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.3.0 — general-purpose slim: the loop, the gate, the files
+
+The 0.2.0 layer grew speculative machinery for two scenarios the core
+loop already covers with cheaper primitives; this release deletes it and
+returns the package to its 0.1.0 shape plus the keeper parts of 0.2.0
+(`--goal-file`, the kicker bin, the inspector/footer).
+
+**Removed: decision consultations.** `consult_reviewer`, `submit_decision`,
+the decision-mode reviewer role, and `decisions.jsonl` are gone. A mid-round
+fork is the worker's to take and report: the goal text (verbatim in every
+brief) pre-answers the foreseeable forks, the worker's choice is visible in
+its event stream and final report, and a fork that broke the goal is a
+rejected verdict — the loop's normal feedback. A truly owner-blocking
+question settles as a no-verdict round; two consecutive ones trip the
+stagnation halt, which is the escalation: the watch stops burning rounds and
+`/watch status` carries the worker's words when you return. Surface: four
+tools → two, three child roles → two, two ledgers → one.
+
+**Removed: parked waits.** The `wait {check_cmd, due_at}` verdict field, the
+derived `WAITING` round state, the driver-side backoff/exhaustion machinery,
+and its three config keys are gone. An external condition is now ordinary
+loop state: the reviewer rejects with notes naming the condition and its
+check command, and the next round is seeded with exactly that note. Round
+states: PENDING / RUNNING / PASS / FAIL / CRASHED.
+
+**Removed: `onEventCmd`.** A cron wrapper already sees every terminal line
+`night-watch advance` prints; the hook duplicated that with a second
+trust-bearing shell-exec config key. Config surface: 19 keys → 15.
+
+**Migration.** Manifests stay version 1. A 0.2 task's config snapshot carries
+the removed keys, and config validation fails loudly naming them — finish
+in-flight 0.2 tasks under 0.2.1 or hand-trim the snapshot's wait/`onEventCmd`
+keys. Old verdict lines with a `wait` field and old `decisions.jsonl` files
+are ignored harmlessly by the readers.
+
+**Verification.** The full free suite runs green — 100 checks across 10
+suites (144 at 0.2.0; the removed features owned the difference) — plus
+`tsc --noEmit` clean against the pi 1.4.0 floor; the @latest canary and
+node-matrix legs run in CI at the tag. No billed observed run:
+this release only deletes mechanisms whose observed runs remain recorded
+under 0.2.0; the loop's happy path/crash/stop coverage is unchanged from
+those entries and re-covered by the retargeted fixtures.
+
 ## 0.2.1 — provenance repository field
 
 Identical to 0.2.0 plus one field: `package.json` now declares
