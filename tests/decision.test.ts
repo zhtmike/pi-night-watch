@@ -1,5 +1,5 @@
-import type { RoundOutcome, Verdict } from "../src/manifest.ts";
-import { crashOutcome, decideOutcome, sha256, terminalFromOutcomes } from "../src/decision.ts";
+import type { RoundOutcome, RoundRec, Verdict } from "../src/manifest.ts";
+import { crashOutcome, decideOutcome, roundWaitState, sha256, terminalFromOutcomes, waitRetryDelayMs } from "../src/decision.ts";
 import { check, finish } from "./harness.ts";
 
 const V = (passed: boolean, notes: string): Verdict => ({ at: "t", round: 1, passed, notes, evidence: ["cmd: ok"] });
@@ -20,4 +20,20 @@ check("distinct sigs continue", terminalFromOutcomes([F("a"), F("b")], 10) === n
 check("crash+crash = identical sig halt", terminalFromOutcomes([crashOutcome(), crashOutcome()], 10)?.state === "HALT_STAGNANT");
 check("budget at maxRounds", terminalFromOutcomes([F("a"), F("b"), F("c")], 3)?.state === "HALT_BUDGET");
 check("under budget continues", terminalFromOutcomes([F("a"), F("b")], 3) === null);
+
+check("wait retry: base then exponential", waitRetryDelayMs(1, 60_000, 900_000) === 60_000 && waitRetryDelayMs(2, 60_000, 900_000) === 120_000 && waitRetryDelayMs(3, 60_000, 900_000) === 240_000);
+check("wait retry: capped", waitRetryDelayMs(9, 60_000, 900_000) === 900_000);
+try {
+	waitRetryDelayMs(0, 60_000, 900_000);
+	check("wait retry: rejects retry < 1", false);
+} catch {
+	check("wait retry: rejects retry < 1", true);
+}
+
+const R = (over: Partial<RoundRec>): RoundRec => ({ id: 2, headPid: 999_999, headStart: "", startedAt: "t", spawnedAt: "t", endedAt: null, outcome: null, ...over });
+const W = (due: string): Verdict => ({ at: "t", round: 2, passed: false, notes: "CI pending", evidence: [], wait: { check_cmd: "gh run watch", due_at: due } });
+check("wait state: null without a wait verdict", roundWaitState(R({}), null) === null && roundWaitState(R({}), { at: "t", round: 2, passed: false, notes: "n", evidence: [] }) === null);
+check("wait state: null on a passing verdict", roundWaitState(R({}), { ...W("t"), passed: true, wait: null }) === null);
+check("wait state: due_at before any check", roundWaitState(R({}), W("2026-11-11T12:00:00Z"))?.nextCheckAt === "2026-11-11T12:00:00Z");
+check("wait state: stored retry slot wins", roundWaitState(R({ waitAttempts: 2, waitNextCheckAt: "2026-11-12T00:00:00Z" }), W("2026-11-11T12:00:00Z"))?.nextCheckAt === "2026-11-12T00:00:00Z" && roundWaitState(R({ waitAttempts: 2 }), W("d"))?.attempts === 2);
 finish("decision");

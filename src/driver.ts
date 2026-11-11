@@ -16,7 +16,7 @@ import * as path from "node:path";
 import { parseStartArgs } from "./args.ts";
 import type { StartOpts } from "./args.ts";
 import { type WatchConfig, normalizeConfig } from "./config.ts";
-import { crashOutcome, decideOutcome, sha256, terminalFromOutcomes } from "./decision.ts";
+import { crashOutcome, decideOutcome, roundWaitState, sha256, terminalFromOutcomes, waitRetryDelayMs } from "./decision.ts";
 import { reviewerBrief, workerBrief } from "./briefs.ts";
 import { parseEvents, validateVerdictArgs } from "./events.ts";
 import {
@@ -248,7 +248,7 @@ export async function runReviewGate(dir: string, round: number, extPath: string)
 		const call = calls[calls.length - 1];
 		if (call) {
 			const v = validateVerdictArgs(call.args);
-			if (!("error" in v)) verdict = { at: new Date().toISOString(), round, passed: v.passed, notes: v.notes, evidence: v.evidence };
+			if (!("error" in v)) verdict = { at: new Date().toISOString(), round, passed: v.passed, notes: v.notes, evidence: v.evidence, wait: v.wait ?? null };
 		}
 	}
 	if (verdict === null) {
@@ -260,20 +260,39 @@ export async function runReviewGate(dir: string, round: number, extPath: string)
 
 // --- criteria / hashes -------------------------------------------------------------------------
 
-/** Lines of criteria output kept for failure notes. */
+/** Lines of shell-command output kept for notes. */
 const CRITERIA_TAIL_LINES = 5;
+
+function runShell(cwd: string, cmd: string, timeoutMs: number): { exit: number | null; tail: string } {
+	const r = spawnSync("bash", ["-c", cmd], { cwd, encoding: "utf-8", timeout: timeoutMs });
+	if (r.error) return { exit: null, tail: `spawn error: ${r.error.message}` };
+	const out = `${r.stdout ?? ""}${r.stderr ?? ""}`.trimEnd();
+	return { exit: r.status, tail: out.split("\n").slice(-CRITERIA_TAIL_LINES).join("\n") };
+}
 
 export function runCriteria(cwd: string, cfg: WatchConfig): { exit: number | null; tail: string } {
 	if (!cfg.criteria) return { exit: null, tail: "" };
-	const r = spawnSync("bash", ["-c", cfg.criteria], { cwd, encoding: "utf-8", timeout: cfg.criteriaTimeoutMs });
-	if (r.error) return { exit: null, tail: `criteria spawn error: ${r.error.message}` };
-	const out = `${r.stdout ?? ""}${r.stderr ?? ""}`.trimEnd();
-	return { exit: r.status, tail: out.split("\n").slice(-CRITERIA_TAIL_LINES).join("\n") };
+	return runShell(cwd, cfg.criteria, cfg.criteriaTimeoutMs);
+}
+
+/** Driver-side wait check; a null exit (spawn error/timeout) counts as a failed check. */
+export function runWaitCheck(cwd: string, checkCmd: string, cfg: WatchConfig): { exit: number | null; tail: string } {
+	return runShell(cwd, checkCmd, cfg.criteriaTimeoutMs);
 }
 
 export function hashCriteriaFiles(cwd: string, files: string[]): string {
 	const parts = files.map((f) => `${f}:${sha256(fs.readFileSync(path.join(cwd, f), "utf-8"))}`);
 	return sha256(parts.join("|"));
+}
+
+/** An unreadable or changed criteria file is tampering's likeliest shape — never a wedge. */
+function criteriaTampered(cwd: string, m: Manifest): boolean {
+	try {
+		const current = m.criteriaFiles.length > 0 ? hashCriteriaFiles(cwd, m.criteriaFiles) : m.criteriaHash;
+		return current !== m.criteriaHash;
+	} catch {
+		return true;
+	}
 }
 
 // --- single-flight lock -----------------------------------------------------------------------------
@@ -333,6 +352,7 @@ export function advanceTask(cwd: string, slug: string, extPath: string): Advance
 		if (m.owner.host !== hostname()) throw new WatchError(`task owned by ${m.owner.host}: fail-closed, hand-delete to retry elsewhere`);
 
 		// 1. Decide every settled-but-undecided round (oldest first).
+		let parked: { round: number; cmd: string; next: string; attempts: number } | null = null;
 		for (const r of m.rounds) {
 			if (r.outcome !== null || r.headPid === null) continue;
 			if (pidAlive(r.headPid, r.headStart)) continue;
@@ -344,18 +364,51 @@ export function advanceTask(cwd: string, slug: string, extPath: string): Advance
 				writeManifest(manifestPath(dir), m);
 				continue;
 			}
-			const verdict = [...readVerdicts(verdictsPath(dir))].reverse().find((v) => v.round === r.id) ?? null;
-			// An unreadable criteria file is tampering's likeliest shape — never a wedge.
-			let currentHash: string | null;
-			try {
-				currentHash = m.criteriaFiles.length > 0 ? hashCriteriaFiles(cwd, m.criteriaFiles) : m.criteriaHash;
-			} catch {
-				currentHash = null;
+			const verdicts = readVerdicts(verdictsPath(dir));
+			const verdict = [...verdicts].reverse().find((v) => v.round === r.id) ?? null;
+			// A last-verdict wait parks the round — it never takes the normal decide path while parked.
+			const wait = roundWaitState(r, verdict);
+			if (wait !== null) {
+				if (Date.now() < Date.parse(wait.nextCheckAt)) {
+					parked = { round: r.id, cmd: wait.check_cmd, next: wait.nextCheckAt, attempts: wait.attempts };
+					continue;
+				}
+				if (criteriaTampered(cwd, m)) {
+					r.outcome = { what: "FAIL", sig: "tamper", note: "criteria files changed since task start (tamper guard)" };
+					r.endedAt = new Date().toISOString();
+					writeManifest(manifestPath(dir), m);
+					continue;
+				}
+				const check = runWaitCheck(cwd, wait.check_cmd, m.config);
+				if (check.exit === 0) {
+					// The wait was a conditional attestation: check exit 0 + criteria (if any) green decides the round PASS outright.
+					const criteriaRun = m.config.criteria ? runCriteria(cwd, m.config) : { exit: null as number | null, tail: "" };
+					r.outcome =
+						m.config.criteria && criteriaRun.exit !== 0
+							? { what: "FAIL", sig: "wait-criteria-red", note: `wait satisfied but criteria exited ${criteriaRun.exit}` }
+							: { what: "PASS", sig: "wait-ok", note: `wait satisfied; ${m.config.criteria ? "criteria exit 0" : "no criteria configured"}` };
+					r.endedAt = new Date().toISOString();
+					writeManifest(manifestPath(dir), m);
+					continue;
+				}
+				const attempts = wait.attempts + 1;
+				r.waitAttempts = attempts;
+				if (attempts >= m.config.waitMaxAttempts) {
+					// Retry-in-place never burns worker rounds per poll; only exhaustion decides the round.
+					r.outcome = { what: "FAIL", sig: "wait-exhausted", note: `check_cmd failed ${attempts} times` };
+					r.endedAt = new Date().toISOString();
+					writeManifest(manifestPath(dir), m);
+					continue;
+				}
+				r.waitNextCheckAt = new Date(Date.now() + waitRetryDelayMs(attempts, m.config.waitRetryBaseMs, m.config.waitRetryMaxMs)).toISOString();
+				writeManifest(manifestPath(dir), m);
+				parked = { round: r.id, cmd: wait.check_cmd, next: r.waitNextCheckAt, attempts };
+				continue;
 			}
 			// A rejected verdict fails the round without burning a criteria run.
 			const criteriaRun = verdict !== null && !verdict.passed ? { exit: null, tail: "" } : runCriteria(cwd, m.config);
 			const decision = decideOutcome({
-				tampered: currentHash === null || currentHash !== m.criteriaHash,
+				tampered: criteriaTampered(cwd, m),
 				verdict,
 				criteriaConfigured: Boolean(m.config.criteria),
 				criteriaExit: criteriaRun.exit,
@@ -381,6 +434,11 @@ export function advanceTask(cwd: string, slug: string, extPath: string): Advance
 		// 3. Any live round is RUNNING.
 		const live = m.rounds.find((r) => r.headPid !== null && pidAlive(r.headPid, r.headStart) && r.outcome === null);
 		if (live) return { slug, lines: [`round ${live.id} RUNNING (head pid ${live.headPid})`] };
+
+		// 3.5 A parked round holds the watch in WAITING — no spawn, no terminal.
+		if (parked) {
+			return { slug, lines: [`round ${parked.round} WAITING on \`${parked.cmd}\` — next check ${parked.next} (attempt ${parked.attempts + 1} of ${m.config.waitMaxAttempts})`] };
+		}
 
 		// 4. Append the write-ahead PENDING record, then spawn. A PENDING round
 		// that already has an event stream was spawned but never recorded —
@@ -433,7 +491,16 @@ export async function stopTask(cwd: string, slug: string): Promise<string[]> {
 	try {
 		if (m.terminal) return [`terminal already: ${m.terminal.state}`];
 		const live = [...m.rounds].reverse().find((r) => r.headPid !== null && pidAlive(r.headPid, r.headStart) && r.outcome === null);
-		if (!live) return ["no live round"];
+		if (!live) {
+			// Nothing to kill — but a parked round would otherwise wait forever: record the stop.
+			const verdicts = readVerdicts(verdictsPath(dir));
+			const parkedRound = m.rounds.find((r) => r.outcome === null && r.headPid !== null && roundWaitState(r, [...verdicts].reverse().find((v) => v.round === r.id) ?? null) !== null);
+			if (!parkedRound) return ["no live round"];
+			parkedRound.endedAt = new Date().toISOString();
+			m.terminal = { state: "STOPPED", at: new Date().toISOString(), note: `stopped by user while round ${parkedRound.id} was WAITING` };
+			writeManifest(manifestPath(dir), m);
+			return [`round ${parkedRound.id} was WAITING — terminal STOPPED`];
+		}
 		const pid = live.headPid as number;
 		const lines = [`stopping round ${live.id}: TERM head ${pid} + group -${pid}`];
 		for (const target of [pid, -pid]) {
@@ -462,15 +529,25 @@ export async function stopTask(cwd: string, slug: string): Promise<string[]> {
 export function statusText(cwd: string, slug: string): string {
 	const dir = taskDir(cwd, slug);
 	const m = readManifest(manifestPath(dir));
+	const verdicts = readVerdicts(verdictsPath(dir));
 	const lines = [`watch ${m.slug}: ${m.goal}`, `config: maxRounds=${m.config.maxRounds} deadline=${m.config.roundDeadlineMin}m criteria=${m.config.criteria ?? "(verdict-only)"}`];
 	if (m.terminal) lines.push(`TERMINAL: ${m.terminal.state} — ${m.terminal.note}`);
 	for (const r of m.rounds) {
-		const state = r.outcome ? `${r.outcome.what} (${r.outcome.note})` : r.headPid === null ? "PENDING" : pidAlive(r.headPid, r.headStart) ? `RUNNING pid ${r.headPid}` : "dead";
+		let state: string;
+		if (r.outcome) state = `${r.outcome.what} (${r.outcome.note})`;
+		else if (r.headPid === null) state = "PENDING";
+		else if (pidAlive(r.headPid, r.headStart)) state = `RUNNING pid ${r.headPid}`;
+		else {
+			const last = [...verdicts].reverse().find((v) => v.round === r.id) ?? null;
+			const wait = roundWaitState(r, last);
+			state = wait ? `WAITING on \`${wait.check_cmd}\` (attempt ${wait.attempts + 1} of ${m.config.waitMaxAttempts}, next check ${wait.nextCheckAt})` : "dead";
+		}
 		lines.push(`round ${r.id}: ${state}`);
 	}
-	for (const v of readVerdicts(verdictsPath(dir))) {
+	for (const v of verdicts) {
 		const note = v.notes.split("\n")[0];
-		lines.push(`verdict r${v.round}: ${v.passed ? "PASS" : "REJECT"} — ${note}`);
+		const head = v.passed ? "PASS" : v.wait ? `WAIT (until ${v.wait.due_at} on \`${v.wait.check_cmd}\`)` : "REJECT";
+		lines.push(`verdict r${v.round}: ${head} — ${note}`);
 	}
 	return lines.join("\n");
 }

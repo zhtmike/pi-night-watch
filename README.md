@@ -86,8 +86,7 @@ comes back through the tool result and lands in the append-only ledger.
 The ceremony: *`start` → (`status` \| `advance`)* → terminal state →
 human review. `stop` group-kills a live round at any point; a crashed
 round is decided from its event stream and the next brief carries its
-last words with a verify-before-acting instruction — inspect, never
-replay.
+last words — inspect, never replay.
 
 ## API
 
@@ -96,10 +95,11 @@ reference in [docs/api.md](docs/api.md):
 
 - **`/watch start`** — create the task (atomic manifest) and spawn round 1; flags: `--criteria`, `--criteria-files`, `--slug`, `--review` (an independent rubric sent to worker and reviewer alike), `--goal-file` (goal from a file, verbatim — the way to pass multi-line prompts).
 - **`/watch status`** — derived state: rounds, verdict chain, terminal.
-- **`/watch advance`** — decide settled rounds, apply terminal rules, spawn the next round. Idempotent; single-flight.
-- **`/watch stop`** — TERM head + group, KILL after grace; terminal `STOPPED`.
+- **`/watch advance`** — decide settled rounds, apply terminal rules, spawn the next round. Idempotent; single-flight. A parked round reports `WAITING`.
+- **`/watch stop`** — TERM head + group, KILL after grace; terminal `STOPPED`. A WAITING task stops with nothing to kill — the park ends in `STOPPED`.
 - **`review_gate`** (worker tool) — spawn the fresh-context reviewer, return its verdict.
-- **`submit_verdict`** (reviewer tool) — `passed`, `notes`, `evidence[]`; each role sees only its own tool.
+- **`submit_verdict`** (reviewer tool) — `passed`, `notes`, `evidence[]`, optionally `wait {check_cmd, due_at}` to park on an external condition; each role sees only its own tool.
+- **`night-watch` bin** — `advance` / `status` for cron or launchd; same lock, same write-ahead, jittered polls. Unattended waits advance with no session open.
 
 ## State model
 
@@ -110,8 +110,9 @@ liveness — round outcomes are stored, phase is never guessed.
 |---|---|
 | `PENDING` | recorded (write-ahead), not yet spawned |
 | `RUNNING` | head alive by pid + start-time |
-| `PASS` | reviewer passed **and** criteria exited 0 (driver-run) |
-| `FAIL` | rejected · criteria red · no gate call · tamper guard tripped |
+| `WAITING` | parked on a reviewer-declared external condition; the driver re-checks it on a backing-off schedule — waits never spend rounds |
+| `PASS` | reviewer passed **and** criteria exited 0 (driver-run), or a wait was satisfied |
+| `FAIL` | rejected · criteria red · no gate call · tamper guard tripped · wait exhausted |
 | `CRASHED` | head died before settling; next brief seeded from its events |
 
 Terminal: `DONE` (first PASS wins) · `HALT_STAGNANT` (identical failure
@@ -121,7 +122,7 @@ signature twice — two crashes included) · `HALT_BUDGET` (maxRounds) ·
 ## Configuration
 
 Per-role `workerModel`/`reviewerModel` with separate thinking pins,
-binaries, deadlines, graces — every knob in
+binaries, deadlines, graces, wait retry/backoff caps — every knob in
 `.pi/night-watch/config.json`; invalid files fail loudly. Full table:
 [docs/api.md](docs/api.md#configuration).
 

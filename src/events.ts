@@ -46,8 +46,14 @@ export function parseEvents(text: string): ParsedEvents {
 /** Verdict field caps (schema contract). */
 export const VERDICT_NOTES_MAX = 500;
 export const VERDICT_EVIDENCE_MAX = 500;
+export const WAIT_CHECK_CMD_MAX = 500;
 
-export type ValidatedVerdict = { passed: boolean; notes: string; evidence: string[] };
+export interface VerdictWait {
+	check_cmd: string;
+	due_at: string;
+}
+
+export type ValidatedVerdict = { passed: boolean; notes: string; evidence: string[]; wait?: VerdictWait };
 
 /** Validate submit_verdict args; returns the verdict fields or an error string. */
 export function validateVerdictArgs(args: unknown): ValidatedVerdict | { error: string } {
@@ -57,5 +63,16 @@ export function validateVerdictArgs(args: unknown): ValidatedVerdict | { error: 
 	if (typeof r.notes !== "string") return { error: `"notes" must be a string` };
 	if (!Array.isArray(r.evidence)) return { error: `"evidence" must be an array of strings` };
 	for (const e of r.evidence) if (typeof e !== "string") return { error: `"evidence" entries must be strings` };
-	return { passed: r.passed, notes: r.notes.slice(0, VERDICT_NOTES_MAX), evidence: r.evidence.map((e) => String(e).slice(0, VERDICT_EVIDENCE_MAX)) };
+	let wait: VerdictWait | undefined;
+	if (r.wait !== undefined) {
+		if (r.passed) return { error: `"wait" is only valid with passed:false (a passing verdict needs no wait)` };
+		if (typeof r.wait !== "object" || r.wait === null) return { error: `"wait" must be an object {check_cmd, due_at}` };
+		const w = r.wait as Record<string, unknown>;
+		if (typeof w.check_cmd !== "string" || w.check_cmd.length === 0 || w.check_cmd.length > WAIT_CHECK_CMD_MAX) {
+			return { error: `"wait.check_cmd" must be a non-empty string ≤ ${WAIT_CHECK_CMD_MAX} chars` };
+		}
+		if (typeof w.due_at !== "string" || !/^\d{4}-\d{2}-\d{2}([Tt]|$)/.test(w.due_at) || !Number.isFinite(Date.parse(w.due_at))) return { error: `"wait.due_at" must be an ISO-8601 timestamp` };
+		wait = { check_cmd: w.check_cmd, due_at: w.due_at };
+	}
+	return { passed: r.passed, notes: r.notes.slice(0, VERDICT_NOTES_MAX), evidence: r.evidence.map((e) => String(e).slice(0, VERDICT_EVIDENCE_MAX)), ...(wait ? { wait } : {}) };
 }

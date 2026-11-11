@@ -11,7 +11,7 @@ const m: Manifest = {
 	slug: "t",
 	goal: "g",
 	reviewRubric: null,
-	config: { piBin: "pi", timeoutBin: "timeout", maxRounds: 2, roundDeadlineMin: 3, reviewerDeadlineMin: 4, killGraceSec: 5, criteriaTimeoutMs: 6, lockGraceMs: 7, preflightTimeoutMs: 8 },
+	config: { piBin: "pi", timeoutBin: "timeout", maxRounds: 2, roundDeadlineMin: 3, reviewerDeadlineMin: 4, killGraceSec: 5, criteriaTimeoutMs: 6, lockGraceMs: 7, preflightTimeoutMs: 8, pollJitterMs: 9, waitRetryBaseMs: 10, waitRetryMaxMs: 11, waitMaxAttempts: 12 },
 	criteriaFiles: [],
 	criteriaHash: "",
 	owner: { host: "h", startedAt: "t" },
@@ -22,6 +22,10 @@ writeManifest(file, m);
 writeManifest(file, m);
 check("round-trips and rewrites atomically", readManifest(file).slug === "t");
 check("no tmp leftovers", fs.readdirSync(path.dirname(file)).every((f) => !f.includes(".tmp")));
+const old = { ...m, config: { piBin: "pi", timeoutBin: "timeout", maxRounds: 2, roundDeadlineMin: 3, reviewerDeadlineMin: 4, killGraceSec: 5, criteriaTimeoutMs: 6, lockGraceMs: 7, preflightTimeoutMs: 8 } } as unknown as Manifest;
+const oldFile = file.replace("manifest.json", "old.json");
+writeManifest(oldFile, old);
+check("old config snapshot gains new-key defaults on read", readManifest(oldFile).config.waitRetryBaseMs === 60_000 && readManifest(oldFile).config.waitMaxAttempts === 5);
 fs.writeFileSync(file.replace("manifest.json", "bad.json"), '{"version":2}');
 try {
 	readManifest(file.replace("manifest.json", "bad.json"));

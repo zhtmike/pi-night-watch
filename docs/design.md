@@ -4,19 +4,19 @@ Positioning, contracts' rationale, and boundaries. The full surface reference is
 
 ## Positioning
 
-pi sessions and their dispatch lanes are fire-and-forget: a lane takes a brief, returns an artifact, and nothing iterates on a verdict. Long-horizon work — where a round of changes must be independently verified, rejected findings disposed of, and the next round seeded from the last — has no owner in that model. pi-night-watch fills exactly that slot and nothing else: the loop, the gate, and the files. It composes with, and does not replace, lane dispatch: worker children are ordinary headless pi processes and inherit whatever the host loads (a worker may fan out through any dispatch tool the user has installed; depth control stays with that tool). A task carries its goal verbatim into every round brief — approvals, constraints, and scope live in the goal text, and anything beyond it is a report item, never auto-executed.
+pi sessions and their dispatch lanes are fire-and-forget: a lane takes a brief, returns an artifact, and nothing iterates on a verdict. Long-horizon work — where a round of changes must be independently verified, rejected findings disposed of, and the next round seeded from the last — has no owner in that model. pi-night-watch fills exactly that slot and nothing else: the loop, the gate, and the files. It composes with, and does not replace, lane dispatch: worker children are ordinary headless pi processes and inherit whatever the host loads (a worker may fan out through any dispatch tool the user has installed; depth control stays with that tool). A task carries its goal verbatim into every round brief — approvals, constraints, and scope live in the goal text, and anything beyond it is a report item, never auto-executed. Round briefs carry state only, never methodology: instructions and working style ride the goal text and the ambient skills, and the tools' descriptions state their own contracts.
 
 ## Pillars
 
 1. **File state only** — the manifest is the single stored truth; outcomes are decided once and immutable; everything else is derived from manifest + events + pids. No database, no server, no daemon.
-2. **Stateless advance** — no process is authoritative. Any session (and later, any schedule) advances the loop; a killed advance costs nothing durable.
+2. **Stateless advance** — no process is authoritative. Any session or scheduled kicker advances the loop; a killed advance costs nothing durable.
 3. **Verdicts are tool calls** — the reviewer's judgment enters the system as a schema-validated structured call parsed from the event stream, never as parsed prose.
 4. **The reviewer is a gate, not a security boundary** — it gates quality with fresh context; the worker has full bash by design and is trusted with it.
 5. **Caps in code, not prompts** — deadlines, budgets, and stagnation rules are enforced by the driver; the model is never asked to police itself.
 
 ## Non-goals
 
-No daemon or authoritative process. No auto-merge: terminal state is DONE → human review; the loop never merges or pushes to protected refs. Not a sandbox or a defense against a hostile worker. No webhook/network listener; external waits are polled (laptop sleep = waits pause; a later advance catches up) — scheduled wake arrives in the roadmap. No queue, fleet, or personas — two prompts, worker and reviewer. No auto-arm from cloned repos: tasks start only by explicit local action. POSIX only (process groups, `ps -o lstart=`, GNU `timeout`).
+No daemon or authoritative process. No auto-merge: terminal state is DONE → human review; the loop never merges or pushes to protected refs. Not a sandbox or a defense against a hostile worker. No webhook/network listener; external waits are parked and re-checked by any advance or a scheduled kicker (laptop sleep = waits pause; the next fire catches up). No queue, fleet, or personas — two prompts, worker and reviewer. No auto-arm from cloned repos: tasks start only by explicit local action. POSIX only (process groups, `ps -o lstart=`, GNU `timeout`).
 
 ## Failure-mode matrix
 
@@ -46,7 +46,8 @@ What can break: children ride pi's CLI surface (`--mode json --no-session --appr
 ## Roadmap
 
 1. Core loop (shipped): spawn core, manifest/verdicts, `/watch`, `review_gate`, state machine, caps.
-2. Waits + scheduled advance: `wait {check_cmd, due_at}` verdict field ⇒ WAITING; a cron/launchd-invocable `advance` bin; jittered polls.
-3. Inspector + events: statusbar live round, `/watch` overlay (verdict chain, events tail), `onEventCmd` on terminal states.
+2. Waits + scheduled advance (shipped): `wait {check_cmd, due_at}` verdict field ⇒ WAITING; the `night-watch` kicker bin; retry-in-place with backoff.
+3. Unattended decision escalation: the reviewer as decision authority when a worker would otherwise stop and ask.
+4. Inspector + events: statusbar live round, `/watch` overlay (verdict chain, events tail), `onEventCmd` on terminal states.
 
 Unscheduled: worker session continuity (`--session-id`); reviewer calibration harness.
