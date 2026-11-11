@@ -1,6 +1,6 @@
 /**
  * Kicker bin integration — free: the bin is invoked as a child process against
- * fabricated WAITING tasks (bad piBin, no agent ever spawns). Scheduling recipes
+ * fabricated settled tasks (bad piBin, no agent ever spawns). Scheduling recipes
  * and the billed observed runs live in docs + CHANGELOG prose, not here.
  */
 
@@ -20,44 +20,40 @@ fs.writeFileSync(path.join(root, ".pi", "night-watch", "config.json"), JSON.stri
 
 const run = (args: string[]) => spawnSync(process.execPath, [BIN, ...args], { encoding: "utf-8", timeout: 30_000 });
 
-// A parked task: round 1 settled, wait verdict due in the future.
-const future = new Date(Date.now() + 3_600_000).toISOString();
-const { slug } = startTask(root, "kicker waits unattended", {});
-const dir = taskDir(root, slug);
-const m = readManifest(manifestPath(dir));
-m.rounds[0].headPid = 999_999;
-m.rounds[0].headStart = "";
-writeManifest(manifestPath(dir), m);
-fs.mkdirSync(path.dirname(workerEventsPath(dir, 1)), { recursive: true });
-fs.writeFileSync(workerEventsPath(dir, 1), JSON.stringify({ type: "agent_settled" }) + "\n");
-appendVerdict(verdictsPath(dir), { at: new Date().toISOString(), round: 1, passed: false, notes: "CI pending", evidence: [], wait: { check_cmd: "exit 0", due_at: future } });
+// A settled task: round 1 settled, passing verdict, head dead — undecided until an advance.
+function settledTask(goal: string): { dir: string; slug: string } {
+	const { slug } = startTask(root, goal, {});
+	const dir = taskDir(root, slug);
+	const m = readManifest(manifestPath(dir));
+	m.rounds[0].headPid = 999_999;
+	m.rounds[0].headStart = "";
+	writeManifest(manifestPath(dir), m);
+	fs.mkdirSync(path.dirname(workerEventsPath(dir, 1)), { recursive: true });
+	fs.writeFileSync(workerEventsPath(dir, 1), JSON.stringify({ type: "agent_settled" }) + "\n");
+	appendVerdict(verdictsPath(dir), { at: new Date().toISOString(), round: 1, passed: true, notes: "done", evidence: [] });
+	return { dir, slug };
+}
+
+const first = settledTask("kicker advances unattended");
 
 const bad = run([]);
 check("no subcommand ⇒ usage, exit 1", bad.status === 1 && bad.stderr.includes("usage"));
 
-const st = run(["status", root, slug]);
-check("status renders WAITING state", st.status === 0 && st.stdout.includes("WAITING") && st.stdout.includes(`round 1: WAITING on \`exit 0\``));
+const st = run(["status", root, first.slug]);
+check("status renders settling round + verdict chain", st.status === 0 && st.stdout.includes("round 1: settling") && st.stdout.includes("verdict r1: PASS"));
 
-const adv = run(["advance", root, slug]);
-check("advance before due ⇒ WAITING, spawns nothing", adv.status === 0 && adv.stdout.includes("WAITING") && readManifest(manifestPath(dir)).rounds.length === 1);
+const adv = run(["advance", root, first.slug]);
+check("advance ⇒ PASS → terminal DONE, no second round", adv.status === 0 && adv.stdout.includes("terminal: DONE") && readManifest(manifestPath(first.dir)).rounds.length === 1);
 
 // The same advance idempotently re-reports (a missed schedule collapses into one catch-up).
-const adv2 = run(["advance", root, slug]);
-check("repeated advance is idempotent WAITING", adv2.status === 0 && adv2.stdout === adv.stdout);
+const adv2 = run(["advance", root, first.slug]);
+check("repeated advance is idempotent", adv2.status === 0 && adv2.stdout === adv.stdout);
 
 // Explicit slug works; slug omission picks latest by mtime.
-const { slug: other } = startTask(root, "a second task parks too", {});
-const dirOther = taskDir(root, other);
-const m2 = readManifest(manifestPath(dirOther));
-m2.rounds[0].headPid = 999_999;
-m2.rounds[0].headStart = "";
-writeManifest(manifestPath(dirOther), m2);
-fs.mkdirSync(path.dirname(workerEventsPath(dirOther, 1)), { recursive: true });
-fs.writeFileSync(workerEventsPath(dirOther, 1), JSON.stringify({ type: "agent_settled" }) + "\n");
-appendVerdict(verdictsPath(dirOther), { at: new Date().toISOString(), round: 1, passed: false, notes: "deploy pending", evidence: [], wait: { check_cmd: "exit 0", due_at: future } });
-fs.utimesSync(manifestPath(dirOther), new Date(Date.now() + 5_000), new Date(Date.now() + 5_000));
+const other = settledTask("a second task settles too");
+fs.utimesSync(manifestPath(other.dir), new Date(Date.now() + 5_000), new Date(Date.now() + 5_000));
 const adv3 = run(["advance", root]);
-check("slug defaults to latest by mtime", adv3.status === 0 && adv3.stdout.includes("deploy pending") === false && readManifest(manifestPath(dirOther)).rounds[0].outcome === null);
+check("slug defaults to latest by mtime", adv3.status === 0 && adv3.stdout.includes("terminal: DONE") && readManifest(manifestPath(other.dir)).rounds[0].outcome?.what === "PASS" && readManifest(manifestPath(first.dir)).rounds.length === 1);
 
 // An absent task fails loudly.
 const missing = run(["status", root, "no-such-task"]);

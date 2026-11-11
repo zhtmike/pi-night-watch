@@ -90,19 +90,17 @@ last words — inspect, never replay.
 
 ## API
 
-Five commands, four tools — full parameter, configuration, and mechanics
+Five commands, two tools — full parameter, configuration, and mechanics
 reference in [docs/api.md](docs/api.md):
 
-- **`/watch`** — the inspector: rounds, verdict + decision chains, the live round's event tail, task-wide usage/cost; a live footer line while a task runs. Zero model tokens.
+- **`/watch`** — the inspector: rounds, the verdict chain, the live round's event tail, task-wide usage/cost; a live footer line while a task runs. Zero model tokens.
 - **`/watch start`** — create the task (atomic manifest) and spawn round 1; flags: `--criteria`, `--criteria-files`, `--slug`, `--review` (an independent rubric sent to worker and reviewer alike), `--goal-file` (goal from a file, verbatim — the way to pass multi-line prompts).
-- **`/watch status`** — derived state: rounds, verdict chain, decision chain, terminal.
-- **`/watch advance`** — decide settled rounds, apply terminal rules, spawn the next round. Idempotent; single-flight. A parked round reports `WAITING`.
-- **`/watch stop`** — TERM head + group, KILL after grace; terminal `STOPPED`. Nothing running (WAITING, settling, or between rounds)? The stop is still recorded — a scheduled kicker can never spawn against it; only an already-determined terminal outcome outranks a stop.
+- **`/watch status`** — derived state: rounds, verdict chain, terminal.
+- **`/watch advance`** — decide settled rounds, apply terminal rules, spawn the next round. Idempotent; single-flight.
+- **`/watch stop`** — TERM head + group, KILL after grace; terminal `STOPPED`. Nothing running (settling, or between rounds)? The stop is still recorded — a scheduled kicker can never spawn against it; only an already-determined terminal outcome outranks a stop.
 - **`review_gate`** (worker tool) — spawn the fresh-context reviewer, return its verdict.
-- **`consult_reviewer`** (worker tool) — escalate a fork to the decision authority; the question, options, and choice land in an append-only ledger — the watch never stalls at a decision.
-- **`submit_verdict`** (reviewer tool) — `passed`, `notes`, `evidence[]`, optionally `wait {check_cmd, due_at}` to park on an external condition; `submit_decision` (decision-mode reviewer) answers consultations. Each child role sees only its own tools.
-- **`night-watch` bin** — `advance` / `status` for cron or launchd; same lock, same write-ahead, jittered polls. Unattended waits advance with no session open.
-- **`onEventCmd`** — optional config hook fired on any terminal state with slug/state/dir in the env.
+- **`submit_verdict`** (reviewer tool) — `passed`, `notes`, `evidence[]`. Each child role sees only its own tools.
+- **`night-watch` bin** — `advance` / `status` for cron or launchd; same lock, same write-ahead, jittered polls. Unattended rounds advance with no session open.
 
 ## State model
 
@@ -113,9 +111,8 @@ liveness — round outcomes are stored, phase is never guessed.
 |---|---|
 | `PENDING` | recorded (write-ahead), not yet spawned |
 | `RUNNING` | head alive by pid + start-time |
-| `WAITING` | parked on a reviewer-declared external condition; the driver re-checks it on a backing-off schedule — waits never spend rounds |
-| `PASS` | reviewer passed **and** criteria exited 0 (driver-run), or a wait was satisfied |
-| `FAIL` | rejected · criteria red · no gate call · tamper guard tripped · wait exhausted |
+| `PASS` | reviewer passed **and** criteria exited 0 (driver-run) |
+| `FAIL` | rejected · criteria red · no gate call · tamper guard tripped |
 | `CRASHED` | head died before settling; next brief seeded from its events |
 
 Terminal: `DONE` (first PASS wins) · `HALT_STAGNANT` (identical failure
@@ -125,8 +122,8 @@ signature twice — two crashes included) · `HALT_BUDGET` (maxRounds) ·
 ## Configuration
 
 Per-role `workerModel`/`reviewerModel` with separate thinking pins,
-binaries, deadlines, graces, wait retry/backoff caps — every knob in
-`.pi/night-watch/config.json`; invalid files fail loudly. Full table:
+binaries, deadlines, graces — every knob in `.pi/night-watch/config.json`;
+invalid files fail loudly. Full table:
 [docs/api.md](docs/api.md#configuration).
 
 ## Testing
