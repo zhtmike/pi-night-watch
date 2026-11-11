@@ -122,6 +122,27 @@ export function startTask(cwd: string, goal: string, opts: { criteriaFiles?: str
 	return { dir, slug };
 }
 
+// --- goal resolution --------------------------------------------------------------------------
+
+/** The goal from inline text or `--goal-file` (contents verbatim, trailing whitespace trimmed). */
+export function resolveGoal(cwd: string, opts: { goal?: string; goalFile?: string }): string {
+	if (opts.goalFile === undefined) {
+		if (!opts.goal) throw new WatchError("no goal given");
+		return opts.goal;
+	}
+	if (opts.goal) throw new WatchError("inline goal and --goal-file are mutually exclusive");
+	const p = path.resolve(cwd, opts.goalFile);
+	let text: string;
+	try {
+		text = fs.readFileSync(p, "utf-8");
+	} catch (err) {
+		throw new WatchError(`--goal-file unreadable: ${p} (${(err as Error).message})`);
+	}
+	const body = text.trimEnd();
+	if (body === "") throw new WatchError(`--goal-file is empty: ${p}`);
+	return body;
+}
+
 // --- spawning ---------------------------------------------------------------------------------
 
 function spawnHead(argv: string[], env: NodeJS.ProcessEnv, outFile: string, errFile: string, detached: boolean, cwd: string): ChildProcess {

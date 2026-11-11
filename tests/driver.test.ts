@@ -7,8 +7,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { advanceTask, latestSlug, startTask } from "../src/driver.ts";
-import { manifestPath, taskDir, workerEventsPath } from "../src/manifest.ts";
+import { advanceTask, latestSlug, resolveGoal, startTask } from "../src/driver.ts";
+import { manifestPath, taskDir, workerEventsPath, WatchError } from "../src/manifest.ts";
 import { readManifest, writeManifest } from "../src/manifest.ts";
 import { check, finish } from "./harness.ts";
 
@@ -58,5 +58,38 @@ const ut = new Date(Date.now() + 5_000);
 fs.utimesSync(manifestPath(taskDir(repo, a.slug)), ut, ut);
 check("latest by mtime", latestSlug(repo) === a.slug);
 void b; // beta task exists only so alpha is not the lone entry
+
+// Goal resolution: --goal-file carries verbatim multi-line text; bad inputs fail loudly.
+const goalFile = path.join(repo, "prompt.md");
+fs.writeFileSync(goalFile, "Since https://example.com/pr/878 is ready,\ndraft the PR for https://example.com/issue/850.\n");
+check(
+	"goal-file contents verbatim (interior newlines kept, trailing whitespace trimmed)",
+	resolveGoal(repo, { goalFile: "prompt.md" }) === "Since https://example.com/pr/878 is ready,\ndraft the PR for https://example.com/issue/850.",
+);
+check("inline goal passes through", resolveGoal(repo, { goal: "plain goal" }) === "plain goal");
+try {
+	resolveGoal(repo, { goal: "inline", goalFile: "prompt.md" });
+	check("resolveGoal rejects inline + goal-file", false);
+} catch (e) {
+	check("resolveGoal rejects inline + goal-file", e instanceof WatchError);
+}
+try {
+	resolveGoal(repo, { goalFile: "missing.md" });
+	check("unreadable goal-file throws", false);
+} catch (e) {
+	check("unreadable goal-file throws", e instanceof WatchError);
+}
+fs.writeFileSync(path.join(repo, "empty.md"), "\n");
+try {
+	resolveGoal(repo, { goalFile: "empty.md" });
+	check("empty goal-file throws", false);
+} catch (e) {
+	check("empty goal-file throws", e instanceof WatchError);
+}
+
+// Goal-file tasks: contents land verbatim in the manifest.
+const { slug: gf } = startTask(repo, resolveGoal(repo, { goalFile: "prompt.md" }), {});
+const mGf = readManifest(manifestPath(taskDir(repo, gf)));
+check("goal from file lands verbatim in manifest", mGf.goal.includes("\n") && mGf.goal.startsWith("Since https://example.com/pr/878"));
 
 finish("driver");

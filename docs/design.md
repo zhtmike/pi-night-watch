@@ -4,7 +4,7 @@ Positioning, contracts' rationale, and boundaries. The full surface reference is
 
 ## Positioning
 
-pi sessions and their dispatch lanes are fire-and-forget: a lane takes a brief, returns an artifact, and nothing iterates on a verdict. Long-horizon work — where a round of changes must be independently verified, rejected findings disposed of, and the next round seeded from the last — has no owner in that model. pi-night-watch fills exactly that slot and nothing else: the loop, the gate, and the files. It composes with, and does not replace, lane dispatch: worker children are ordinary headless pi processes and inherit whatever the host loads (a worker may fan out through any dispatch tool the user has installed; depth control stays with that tool).
+pi sessions and their dispatch lanes are fire-and-forget: a lane takes a brief, returns an artifact, and nothing iterates on a verdict. Long-horizon work — where a round of changes must be independently verified, rejected findings disposed of, and the next round seeded from the last — has no owner in that model. pi-night-watch fills exactly that slot and nothing else: the loop, the gate, and the files. It composes with, and does not replace, lane dispatch: worker children are ordinary headless pi processes and inherit whatever the host loads (a worker may fan out through any dispatch tool the user has installed; depth control stays with that tool). A task carries its goal verbatim into every round brief — approvals, constraints, and scope live in the goal text, and anything beyond it is a report item, never auto-executed.
 
 ## Pillars
 

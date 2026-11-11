@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { defineTool, type AgentToolResult, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { validateVerdictArgs } from "./events.ts";
-import { advanceTask, latestSlug, parseStartArgs, runReviewGate, startTask, statusText, stopTask } from "./driver.ts";
+import { advanceTask, latestSlug, parseStartArgs, resolveGoal, runReviewGate, startTask, statusText, stopTask } from "./driver.ts";
 
 const EXT_PATH = fileURLToPath(import.meta.url);
 const text = (s: string): AgentToolResult => ({ content: [{ type: "text", text: s }], details: {} });
@@ -52,7 +52,7 @@ const reviewGateTool = defineTool({
 	},
 });
 
-const USAGE = "usage: /watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] <goal> | /watch status [slug] | /watch advance [slug] | /watch stop [slug]";
+const USAGE = "usage: /watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] [<goal>] | /watch status [slug] | /watch advance [slug] | /watch stop [slug]";
 
 export default function (pi: ExtensionAPI) {
 	const reviewer = process.env.NIGHTWATCH_REVIEWER === "1";
@@ -83,11 +83,12 @@ export default function (pi: ExtensionAPI) {
 			try {
 				if (cmd === "start") {
 					const o = parseStartArgs(args.slice("start".length));
-					if (!o.goal) {
+					if (!o.goal && !o.goalFile) {
 						ctx.ui.notify(USAGE, "warning");
 						return;
 					}
-					const { slug } = startTask(ctx.cwd, o.goal, { criteriaFiles: o.criteriaFiles, slug: o.slug, criteria: o.criteria, reviewRubric: o.reviewRubric });
+					const goal = resolveGoal(ctx.cwd, { goal: o.goal || undefined, goalFile: o.goalFile });
+					const { slug } = startTask(ctx.cwd, goal, { criteriaFiles: o.criteriaFiles, slug: o.slug, criteria: o.criteria, reviewRubric: o.reviewRubric });
 					const rep = advanceTask(ctx.cwd, slug, EXT_PATH);
 					ctx.ui.notify([`task ${slug} started`, ...rep.lines].join("\n"), "info");
 				} else if (cmd === "status") {

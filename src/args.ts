@@ -11,9 +11,11 @@ export interface StartOpts {
 	criteriaFiles?: string[];
 	slug?: string;
 	reviewRubric?: string;
+	/** File whose contents are the goal, verbatim (multi-line safe). */
+	goalFile?: string;
 }
 
-const FLAGS = new Set(["--criteria", "--criteria-files", "--slug", "--review"]);
+const FLAGS = new Set(["--criteria", "--criteria-files", "--slug", "--review", "--goal-file"]);
 
 /** Tokenize a command tail with single/double-quoted segments preserved. */
 export function tokenize(s: string): string[] {
@@ -38,7 +40,8 @@ export function tokenize(s: string): string[] {
 	return out;
 }
 
-/** `/watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] <goal…>` */
+/** `/watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] <goal…>`
+ * Inline goals are whitespace-flattened to one line; `--goal-file` carries a file verbatim. */
 export function parseStartArgs(args: string): StartOpts {
 	const tokens = tokenize(args);
 	const out: StartOpts = { goal: "" };
@@ -53,11 +56,13 @@ export function parseStartArgs(args: string): StartOpts {
 			if (t === "--criteria") out.criteria = value;
 			else if (t === "--criteria-files") out.criteriaFiles = value.split(",").map((x) => x.trim()).filter(Boolean);
 			else if (t === "--slug") out.slug = value;
+			else if (t === "--goal-file") out.goalFile = value;
 			else out.reviewRubric = value;
 		} else {
 			rest.push(t);
 		}
 	}
+	if (out.goalFile !== undefined && rest.length > 0) throw new ConfigError("inline goal and --goal-file are mutually exclusive");
 	out.goal = rest.join(" ");
 	return out;
 }

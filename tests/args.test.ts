@@ -16,4 +16,12 @@ check("criteria files split", JSON.stringify(ps.criteriaFiles) === JSON.stringif
 check("slug + goal", ps.slug === "fix-it" && ps.goal === "Make the suite pass");
 const pr = parseStartArgs('--review "no + operator" Make it pass');
 check("review rubric flag", pr.reviewRubric === "no + operator" && pr.goal === "Make it pass");
+const pg = parseStartArgs("--goal-file prompt.md --slug draft");
+check("goal-file flag parsed", pg.goalFile === "prompt.md" && pg.slug === "draft" && pg.goal === "");
+try {
+	parseStartArgs("--goal-file prompt.md also an inline goal");
+	check("goal-file + inline goal rejected", false);
+} catch (e) {
+	check("goal-file + inline goal rejected", e instanceof ConfigError);
+}
 finish("args");

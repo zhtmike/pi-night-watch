@@ -94,7 +94,7 @@ replay.
 Four commands, two tools — full parameter, configuration, and mechanics
 reference in [docs/api.md](docs/api.md):
 
-- **`/watch start`** — create the task (atomic manifest) and spawn round 1; flags: `--criteria`, `--criteria-files`, `--slug`, `--review` (an independent rubric sent to worker and reviewer alike).
+- **`/watch start`** — create the task (atomic manifest) and spawn round 1; flags: `--criteria`, `--criteria-files`, `--slug`, `--review` (an independent rubric sent to worker and reviewer alike), `--goal-file` (goal from a file, verbatim — the way to pass multi-line prompts).
 - **`/watch status`** — derived state: rounds, verdict chain, terminal.
 - **`/watch advance`** — decide settled rounds, apply terminal rules, spawn the next round. Idempotent; single-flight.
 - **`/watch stop`** — TERM head + group, KILL after grace; terminal `STOPPED`.
@@ -127,7 +127,7 @@ binaries, deadlines, graces — every knob in
 
 ## Testing
 
-`npm test` — ten free unit suites; no test in this repo bills models.
+`npm test` — free unit suites, one per module concern; no test in this repo bills models.
 
 ## Contributing · License
 
