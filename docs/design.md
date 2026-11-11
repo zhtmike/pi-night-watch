@@ -42,12 +42,3 @@ Adopt when suspendable-work ships **and** stabilizes: swap the advance internals
 ## Compatibility posture
 
 What can break: children ride pi's CLI surface (`--mode json --no-session --approve -e --model --thinking`) and its JSON event stream — both have changed within pi's 1.x line before. After any pi upgrade, check `pi --help` against the argv builder in `driver.ts` and the event types in `events.ts`. Node ≥ 22.19 (type stripping). macOS needs GNU coreutils for the leash (`timeoutBin: "gtimeout"`).
-
-## Roadmap
-
-1. Core loop (shipped): spawn core, manifest/verdicts, `/watch`, `review_gate`, state machine, caps.
-2. Waits + scheduled advance (shipped): `wait {check_cmd, due_at}` verdict field ⇒ WAITING; the `night-watch` kicker bin; retry-in-place with backoff.
-3. Unattended decision escalation (shipped): the reviewer as decision authority — `consult_reviewer` / `submit_decision`, append-only decisions ledger, decision chain in status.
-4. Inspector + events (shipped): statusbar live round, bare `/watch` overlay (verdict chain, decision chain, events tail, usage), `onEventCmd` on terminal states.
-
-Unscheduled: worker session continuity (`--session-id`); reviewer calibration harness.
