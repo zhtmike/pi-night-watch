@@ -35,6 +35,7 @@ import {
 	briefPath,
 	configPath,
 	lockPath,
+	roundDir,
 	slugify,
 	taskDir,
 	verdictsPath,
@@ -43,6 +44,7 @@ import {
 	writeManifest,
 	type Decision,
 	type Manifest,
+	type TerminalState,
 	type Verdict,
 	WatchError,
 } from "./manifest.ts";
@@ -484,11 +486,7 @@ export function advanceTask(cwd: string, slug: string, extPath: string): Advance
 				m.rounds.map((r) => r.outcome as NonNullable<typeof r.outcome>),
 				m.config.maxRounds,
 			);
-			if (term) {
-				m.terminal = { state: term.state, at: new Date().toISOString(), note: term.note };
-				writeManifest(manifestPath(dir), m);
-				return { slug, lines: [`terminal: ${term.state} — ${term.note}`] };
-			}
+			if (term) return { slug, lines: writeTerminal(cwd, dir, m, term.state, term.note) };
 		}
 
 		// 3. Any live round is RUNNING.
@@ -524,9 +522,7 @@ export function advanceTask(cwd: string, slug: string, extPath: string): Advance
 			return { slug, lines: [`round ${next.id} SPAWNED (head pid ${head.headPid})`] };
 		} catch (err) {
 			if (!(err instanceof WatchSpawnError)) throw err;
-			m.terminal = { state: "HALT_ERROR", at: new Date().toISOString(), note: `spawn failed: ${(err as Error).message}` };
-			writeManifest(manifestPath(dir), m);
-			return { slug, lines: [`terminal: HALT_ERROR — ${(err as Error).message}`] };
+			return { slug, lines: writeTerminal(cwd, dir, m, "HALT_ERROR", `spawn failed: ${(err as Error).message}`) };
 		}
 	} finally {
 		release();
@@ -539,6 +535,25 @@ function safeRead(p: string): string | null {
 	} catch {
 		return null;
 	}
+}
+
+// --- terminal writes ---------------------------------------------------------------------------
+
+/** Write a terminal state and fire the configured onEventCmd (trust posture identical to criteria; runs at the workspace root). */
+function writeTerminal(cwd: string, dir: string, m: Manifest, state: TerminalState, note: string): string[] {
+	m.terminal = { state, at: new Date().toISOString(), note };
+	writeManifest(manifestPath(dir), m);
+	const lines = [`terminal: ${state} — ${note}`];
+	if (m.config.onEventCmd) {
+		const r = spawnSync("bash", ["-c", m.config.onEventCmd], {
+			cwd,
+			encoding: "utf-8",
+			timeout: m.config.criteriaTimeoutMs,
+			env: { ...process.env, NIGHTWATCH_SLUG: m.slug, NIGHTWATCH_STATE: state, NIGHTWATCH_DIR: dir },
+		});
+		lines.push(r.error ? `onEventCmd spawn error: ${r.error.message}` : r.status === 0 ? "onEventCmd fired" : `onEventCmd exited ${r.status}`);
+	}
+	return lines;
 }
 
 // --- stop / status -------------------------------------------------------------------------------------
@@ -557,9 +572,7 @@ export async function stopTask(cwd: string, slug: string): Promise<string[]> {
 			const parkedRound = m.rounds.find((r) => r.outcome === null && r.headPid !== null && roundWaitState(r, [...verdicts].reverse().find((v) => v.round === r.id) ?? null) !== null);
 			if (!parkedRound) return ["no live round"];
 			parkedRound.endedAt = new Date().toISOString();
-			m.terminal = { state: "STOPPED", at: new Date().toISOString(), note: `stopped by user while round ${parkedRound.id} was WAITING` };
-			writeManifest(manifestPath(dir), m);
-			return [`round ${parkedRound.id} was WAITING — terminal STOPPED`];
+			return writeTerminal(cwd, dir, m, "STOPPED", `stopped by user while round ${parkedRound.id} was WAITING`);
 		}
 		const pid = live.headPid as number;
 		const lines = [`stopping round ${live.id}: TERM head ${pid} + group -${pid}`];
@@ -578,8 +591,7 @@ export async function stopTask(cwd: string, slug: string): Promise<string[]> {
 			lines.push("group gone before KILL");
 		}
 		live.endedAt = new Date().toISOString();
-		m.terminal = { state: "STOPPED", at: new Date().toISOString(), note: `stopped by user during round ${live.id}` };
-		writeManifest(manifestPath(dir), m);
+		lines.push(...writeTerminal(cwd, dir, m, "STOPPED", `stopped by user during round ${live.id}`).slice(1));
 		return lines;
 	} finally {
 		release();
@@ -611,6 +623,83 @@ export function statusText(cwd: string, slug: string): string {
 	}
 	for (const d of readDecisions(decisionsPath(dir))) {
 		lines.push(`decision r${d.round}: ${d.choice ?? "unanswered"} — ${d.question.split("\n")[0]}${d.recommendation ? ` (worker recommended: ${d.recommendation.split("\n")[0]})` : ""}`);
+	}
+	return lines.join("\n");
+}
+
+/** One footer line for a live task; null when no task, unreadable state, or terminal. */
+export function statusLine(cwd: string, slug: string): string | null {
+	const dir = taskDir(cwd, slug);
+	let m: Manifest;
+	try {
+		m = readManifest(manifestPath(dir));
+	} catch {
+		return null;
+	}
+	if (m.terminal) return null;
+	const verdicts = readVerdicts(verdictsPath(dir));
+	const decisions = readDecisions(decisionsPath(dir)).length;
+	const last = m.rounds[m.rounds.length - 1];
+	let phase: string;
+	if (last === undefined) phase = "PENDING";
+	else if (last.outcome !== null) phase = "decided";
+	else if (last.headPid !== null && pidAlive(last.headPid, last.headStart)) phase = `round ${last.id} RUNNING (pid ${last.headPid})`;
+	else {
+		const wait = roundWaitState(last, [...verdicts].reverse().find((v) => v.round === last.id) ?? null);
+		phase = wait ? `round ${last.id} WAITING (attempt ${wait.attempts + 1}, next ${wait.nextCheckAt})` : `round ${last.id} settling`;
+	}
+	return `watch ${m.slug}: ${phase} · ${verdicts.length} verdicts · ${decisions} decisions · rounds ${m.rounds.length}/${m.config.maxRounds}`;
+}
+
+/** Events formatted for the overlay tail — compact, one line each. */
+const OVERLAY_TAIL_EVENTS = 10;
+
+/** The bare `/watch` overlay: full status + live-round event tail + task-wide usage. Zero model tokens. */
+export function overlayText(cwd: string, slug: string): string {
+	const dir = taskDir(cwd, slug);
+	const m = readManifest(manifestPath(dir));
+	const lines = statusText(cwd, slug).split("\n");
+	// Task-wide usage: every event stream the task has written.
+	let tokens = 0;
+	let cost = 0;
+	for (const r of m.rounds) {
+		for (const f of fs.existsSync(roundDir(dir, r.id)) ? fs.readdirSync(roundDir(dir, r.id)) : []) {
+			if (!f.endsWith(".events.jsonl")) continue;
+			const p = path.join(roundDir(dir, r.id), f);
+			const parsed = parseEvents(fs.readFileSync(p, "utf-8"));
+			tokens += parsed.usage.tokens;
+			cost += parsed.usage.cost;
+		}
+	}
+	lines.push(`usage: ${tokens.toLocaleString("en-US")} tokens · $${cost.toFixed(4)}`);
+	// Live round tail: the newest round with an event stream.
+	for (const r of [...m.rounds].reverse()) {
+		const p = workerEventsPath(dir, r.id);
+		if (!fs.existsSync(p)) continue;
+		const text = fs.readFileSync(p, "utf-8");
+		const events: string[] = [];
+		for (const line of text.split("\n").filter((l) => l !== "")) {
+			let ev: Record<string, unknown>;
+			try {
+				ev = JSON.parse(line) as Record<string, unknown>;
+			} catch {
+				continue;
+			}
+			if (ev.type === "message_end") {
+				const msg = ev.message as Record<string, unknown> | undefined;
+				if (msg?.role === "assistant") {
+					const parts = (msg.content as Array<Record<string, unknown>> | undefined)?.filter((c) => c.type === "text").map((c) => String(c.text ?? ""));
+					const t = (parts ?? []).join("").trim().slice(0, 100);
+					if (t !== "") events.push(`assistant: ${t}`);
+				}
+			} else if (ev.type === "tool_execution_start") {
+				events.push(`tool: ${String(ev.toolName)}${ev.toolName === "bash" ? ` — ${String((ev.args as Record<string, unknown> | undefined)?.command ?? "").slice(0, 60)}` : ""}`);
+			} else if (ev.type === "agent_settled") {
+				events.push("settled");
+			}
+		}
+		lines.push(``, `## Round ${r.id} tail (last ${OVERLAY_TAIL_EVENTS})`, ...events.slice(-OVERLAY_TAIL_EVENTS).map((l) => `- ${l}`));
+		break;
 	}
 	return lines.join("\n");
 }
