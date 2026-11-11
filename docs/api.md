@@ -20,11 +20,11 @@ Unknown or valueless flags are rejected, never silently folded into the goal.
 
 The goal is re-stated verbatim in every round brief, so anything written into it — an approval statement ("I have already human approved; do it yourself"), constraints, links, working style — reaches every round unchanged. The tool adds no approval machinery of its own: a worker whose environment has approval rules reads them from the goal; a worker with none simply proceeds. Actions beyond the goal's scope (merging, pushing to protected refs) are report items at task end, never auto-executed.
 
-Briefs carry state only — goal, round, outcomes, reviewer findings, wait bookkeeping. All methodology and instruction prose belongs in the goal (it reaches both roles) or in the ambient skills; the tools' own descriptions state their call contracts. A goal with an external condition should say so and instruct the worker to gate as soon as its own part is done — the reviewer can then park on it (`wait`), which is far cheaper than a worker polling it into its round leash.
+Briefs carry state only — goal, round, outcomes, reviewer findings, decision chain, wait bookkeeping. All methodology and instruction prose belongs in the goal (it reaches both roles) or in the ambient skills; the tools' own descriptions state their call contracts. A goal with an external condition should say so and instruct the worker to gate as soon as its own part is done — the reviewer can then park on it (`wait`), which is far cheaper than a worker polling it into its round leash. A goal that expects mid-flight forks should say the worker escalates them via `consult_reviewer` instead of stalling or picking silently. Consultations are reviewer runs inside the worker's round leash — the leash and `reviewerDeadlineMin` bound them; no separate cap exists.
 
 ### `/watch status [slug]`
 
-Renders the derived state: config summary, terminal state, per-round state (PENDING / RUNNING / outcome), and the verdict chain.
+Renders the derived state: config summary, terminal state, per-round state (PENDING / RUNNING / WAITING / outcome), the verdict chain, and the decision chain (`decision r<n>: <choice> — <question>`, with the worker's recommendation appended when given; `unanswered` when no parseable answer came back). Human review after the fact is the point: every mid-round fork the worker escalated is visible here.
 
 ### `/watch advance [slug]`
 
@@ -36,10 +36,12 @@ TERM to the round head + TERM to its process group, KILL to the group after `kil
 
 ## Tools
 
-Roles are env-gated; each child sees only its own tool.
+Roles are env-gated; each child sees only its own tools (`submit_verdict` for the verdict reviewer, `submit_decision` for the decider, `review_gate` + `consult_reviewer` for the worker).
 
 - `review_gate` (worker) — spawns a fresh-context reviewer child, parses its verdict, appends it to the verdict ledger, returns it as the tool result. No arguments.
+- `consult_reviewer` (worker) — `{question ≤500, options: ≥2 strings, recommendation?}`: ask the decision authority when facing a fork you would otherwise stop and ask the owner about. Spawns a decision-mode reviewer, appends the ask + answer to the decisions ledger, returns the decision verbatim — interpreting it is the worker's. Never blocks on a human; a run that never calls `submit_decision` is recorded as unanswered and the worker proceeds on its own judgment.
 - `submit_verdict` (reviewer) — `passed: boolean`, `notes: string ≤ 500`, `evidence: string[]` (each a command and what it showed), and optionally `wait: {check_cmd ≤ 500 chars, due_at ISO-8601}` — only with `passed:false`, when one external condition outside any worker's control (a CI run, a deploy, a timer) is all that remains. Rejected shapes return an error the reviewer can retry.
+- `submit_decision` (decision-mode reviewer) — `choice: string`, `reasoning ≤ 500`; recorded verbatim. Spawned only by `consult_reviewer`; the verdict reviewer never sees it.
 
 ## Configuration
 
@@ -82,10 +84,12 @@ The round leash bounds *everything* the round starts: sub-agents or lanes spawne
 .pi/night-watch/config.json
 .pi/night-watch/<slug>/manifest.json              the only stored state (atomic writes)
 .pi/night-watch/<slug>/verdicts.jsonl             append-only reviewer verdicts
+.pi/night-watch/<slug>/decisions.jsonl            append-only decision consultations (ask + answer)
 .pi/night-watch/<slug>/advance.lock               single-flight claim
 .pi/night-watch/<slug>/rounds/<n>/brief.md        write-ahead round brief
 .pi/night-watch/<slug>/rounds/<n>/worker.events.jsonl   (+ worker.err)
 .pi/night-watch/<slug>/rounds/<n>/review-<k>-<a>.events.jsonl   per attempt (+ .err, .brief.md)
+.pi/night-watch/<slug>/rounds/<n>/decision-<k>-<a>.events.jsonl  per attempt (+ .err, .brief.md)
 ```
 
 ## Round outcomes and terminal states

@@ -17,11 +17,16 @@ import { parseStartArgs } from "./args.ts";
 import type { StartOpts } from "./args.ts";
 import { type WatchConfig, normalizeConfig } from "./config.ts";
 import { crashOutcome, decideOutcome, roundWaitState, sha256, terminalFromOutcomes, waitRetryDelayMs } from "./decision.ts";
-import { reviewerBrief, workerBrief } from "./briefs.ts";
-import { parseEvents, validateVerdictArgs } from "./events.ts";
+import { reviewerBrief, workerBrief, decisionBrief } from "./briefs.ts";
+import { parseEvents, validateVerdictArgs, validateConsultArgs, validateDecisionArgs, type ConsultAsk } from "./events.ts";
 import {
+	appendDecision,
 	appendVerdict,
+	decisionsPath,
+	decisionBriefPath,
+	decisionEventsPath,
 	manifestPath,
+	readDecisions,
 	readManifest,
 	readVerdicts,
 	reviewerBriefPath,
@@ -36,6 +41,7 @@ import {
 	watchRoot,
 	workerEventsPath,
 	writeManifest,
+	type Decision,
 	type Manifest,
 	type Verdict,
 	WatchError,
@@ -168,7 +174,7 @@ class WatchSpawnError extends WatchError {}
 function spawnWorkerRound(cwd: string, dir: string, m: Manifest, round: number, extPath: string): { headPid: number; headStart: string } {
 	preflight(m.config.piBin, m.config.preflightTimeoutMs, "pi binary");
 	preflight(m.config.timeoutBin, m.config.preflightTimeoutMs, "timeout binary");
-	const brief = workerBrief(m, readVerdicts(verdictsPath(dir)), round, lastRoundText(dir, m, round));
+	const brief = workerBrief(m, readVerdicts(verdictsPath(dir)), round, lastRoundText(dir, m, round), readDecisions(decisionsPath(dir)));
 	fs.mkdirSync(path.dirname(briefPath(dir, round)), { recursive: true });
 	fs.writeFileSync(briefPath(dir, round), brief);
 	const argv = childArgv({
@@ -218,7 +224,7 @@ export async function runReviewGate(dir: string, round: number, extPath: string)
 	let verdict: Verdict | null = null;
 	for (let attempt = 0; attempt < REVIEWER_ATTEMPTS && verdict === null; attempt++) {
 		const brief = reviewerBrief(m, verdicts, attempt > 0);
-		fs.mkdirSync(path.dirname(brief), { recursive: true });
+		fs.mkdirSync(path.dirname(reviewerBriefPath(dir, round, k, attempt)), { recursive: true });
 		fs.writeFileSync(reviewerBriefPath(dir, round, k, attempt), brief);
 		const argv = childArgv({
 			piBin: m.config.piBin,
@@ -256,6 +262,60 @@ export async function runReviewGate(dir: string, round: number, extPath: string)
 	}
 	appendVerdict(verdictsPath(dir), verdict);
 	return verdict;
+}
+
+/** Spawn a decision-mode reviewer for the worker's question, parse its submit_decision call, append it. */
+export async function runConsultation(dir: string, round: number, ask: ConsultAsk, extPath: string): Promise<Decision> {
+	const m = readManifest(manifestPath(dir));
+	const decisions = readDecisions(decisionsPath(dir));
+	const k = decisions.filter((d) => d.round === round).length + 1;
+	let answer: { choice: string; reasoning: string } | null = null;
+	for (let attempt = 0; attempt < REVIEWER_ATTEMPTS && answer === null; attempt++) {
+		const brief = decisionBrief(m, decisions, ask, attempt > 0);
+		fs.mkdirSync(path.dirname(decisionBriefPath(dir, round, k, attempt)), { recursive: true });
+		fs.writeFileSync(decisionBriefPath(dir, round, k, attempt), brief);
+		const argv = childArgv({
+			piBin: m.config.piBin,
+			timeoutBin: m.config.timeoutBin,
+			extPath,
+			model: m.config.reviewerModel,
+			thinking: m.config.reviewerThinkingLevel,
+			deadlineSec: m.config.reviewerDeadlineMin * 60,
+			killGraceSec: m.config.killGraceSec,
+			briefPath: decisionBriefPath(dir, round, k, attempt),
+			foreground: true,
+		});
+		const outFile = decisionEventsPath(dir, round, k, attempt);
+		await new Promise<void>((resolve) => {
+			const child = spawnHead(
+				argv,
+				{ ...process.env, NIGHTWATCH_TASK_DIR: dir, NIGHTWATCH_ROUND: String(round), NIGHTWATCH_DECIDER: "1" },
+				outFile,
+				roundErrPath(dir, round, `decision-${k}-${attempt}`),
+				false, // --foreground keeps the decider inside the worker's process group
+				process.cwd(),
+			);
+			child.on("exit", () => resolve());
+			child.on("error", () => resolve());
+		});
+		const calls = parseEvents(fs.readFileSync(outFile, "utf-8")).decisionCalls;
+		const call = calls[calls.length - 1];
+		if (call) {
+			const d = validateDecisionArgs(call.args);
+			if (!("error" in d)) answer = d;
+		}
+	}
+	const decision: Decision = {
+		at: new Date().toISOString(),
+		round,
+		question: ask.question,
+		options: ask.options,
+		recommendation: ask.recommendation,
+		choice: answer?.choice ?? null,
+		reasoning: answer?.reasoning ?? "DECIDER_OUTPUT_UNPARSEABLE: no valid submit_decision call",
+	};
+	appendDecision(decisionsPath(dir), decision);
+	return decision;
 }
 
 // --- criteria / hashes -------------------------------------------------------------------------
@@ -548,6 +608,9 @@ export function statusText(cwd: string, slug: string): string {
 		const note = v.notes.split("\n")[0];
 		const head = v.passed ? "PASS" : v.wait ? `WAIT (until ${v.wait.due_at} on \`${v.wait.check_cmd}\`)` : "REJECT";
 		lines.push(`verdict r${v.round}: ${head} — ${note}`);
+	}
+	for (const d of readDecisions(decisionsPath(dir))) {
+		lines.push(`decision r${d.round}: ${d.choice ?? "unanswered"} — ${d.question.split("\n")[0]}${d.recommendation ? ` (worker recommended: ${d.recommendation.split("\n")[0]})` : ""}`);
 	}
 	return lines.join("\n");
 }
