@@ -11,6 +11,10 @@
 		"review"
 	],
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/zhtmike/pi-night-watch"
+	},
 	"type": "module",
 	"bin": {
 		"night-watch": "bin/night-watch"
