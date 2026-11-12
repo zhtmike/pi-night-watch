@@ -83,6 +83,9 @@ can run itself:
 
 The worker calls `review_gate` when it believes it is done; the verdict
 comes back through the tool result and lands in the append-only ledger.
+Approvals ride the goal text: where the worker's approval rules apply,
+an approval sentence in the goal covers exactly the actions the goal
+names; actions gated beyond that come back as report items.
 The ceremony: *`start` → (`status` \| `advance`)* → terminal state →
 human review. `stop` group-kills a live round at any point; a crashed
 round is decided from its event stream and the next brief carries its
