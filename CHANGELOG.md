@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2 — kicker bin runs from installs (compiled dist at publish)
+
+The kicker bin crashed at import wherever node resolved it under `node_modules` — node never applies runtime type stripping there, and the bin imported `src/driver.ts`, so every stock node satisfying the engines floor threw `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` on the first import. The cron/launchd surface was dead on arrival from an npm install; the in-session loop was unaffected (pi's extension loader handles the TS).
+
+**The fix.** Publish carries compiled JS: a pure-node build (`scripts/build.mjs` — `module.stripTypeScriptTypes`, in the engines floor since 22.13, with `.ts` import specifiers rewritten to `.js` and a smoke import of the emitted driver) builds `dist/` at `prepack`, and `pretest` runs the same build so bare-checkout test runs (CI legs and the release's `npm test` included) always have it — the first cut built with `tsc` at prepack only, and a pre-commit review caught the kicker suite breaking on bare checkouts (the bin imports `dist/`; the test legs are zero-install by design). The bin imports `dist/driver.js`; both `src/` and `dist/` ship — `src/index.ts` stays the `-e` extension and out of the compiled graph (the bin must not depend on the pi host). A `pack-install-run` CI leg packs, installs the tarball into a scratch root, and runs the installed bin — the regression cannot ship silently again. Zero-install posture unchanged: the build needs nothing beyond stock node.
+
+**Observed run.** The 0.3.2 tarball (strip-built) installed into a scratch root: the installed bin's `status` runs its no-task path where the issue's stack trace used to be, and it drove a live task end-to-end from the install location — round 1 FAIL (settled without calling the gate), round 2 spawned by the installed bin `-e` the installed extension, reviewer PASS, criteria exit 0, `TERMINAL: DONE`. Free suite: 100 checks across 10 suites (pretest included); `tsc --noEmit` clean against the 1.4.0 floor and the 1.5.2 canary.
+
+**Known interplay, recorded.** A machine carrying a user-level install of this package plus a developer `-e <checkout>` session double-registers `review_gate`/`/watch`, and pi fails the load loudly with a conflict naming both paths — one copy per process. The installed flow is self-consistent (the driver's `-e` resolves to the discovered copy's own path); only mixed-copy setups collide.
+
 ## 0.3.1 — the approval contract onto the agent-facing surfaces
 
 The approval contract existed only in human-facing docs; the agents inside the loop never saw it, so how a round weighed an approval sentence against its ambient rules was decided per-model, invisibly. It now rides the surfaces each role reads. Description text and docs only — no behavior change.
