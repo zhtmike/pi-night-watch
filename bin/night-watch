@@ -9,7 +9,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { advanceTask, latestSlug, readConfig, statusText } from "../src/driver.ts";
+import { advanceTask, latestSlug, readConfig, statusText } from "../dist/driver.js";
 
 const USAGE = "usage: night-watch advance [dir] [slug] | night-watch status [dir] [slug]  (dir defaults to cwd, slug to the latest task)";
 

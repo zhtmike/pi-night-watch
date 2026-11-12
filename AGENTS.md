@@ -29,4 +29,4 @@ A deliberately small surface: five commands (one `/watch` — start/status/advan
 - pi flag drift is the standing compat hazard (children ride `--mode json --no-session --approve -e …`); after any pi upgrade, check `pi --help` against the argv builder in `driver.ts`.
 - Comments carry their own invariants — no file cites a design document; no file narrates its own history.
 - WHY-comments only, two lines max. The manifest is the only stored state.
-- CI: tests on push/PR (node 22.19.0 floor + 24); typecheck against `pi-coding-agent@1.4.0` with a `@latest` canary; releases are tag-driven — tag == package.json version == a CHANGELOG `## <version> — <title>` section, then OIDC provenance publish + GitHub release.
+- CI: tests on push/PR (node 22.19.0 floor + 24); typecheck against `pi-coding-agent@1.4.0` with a `@latest` canary; a pack-install leg builds the tarball (prepack) and runs the shipped bin from a real `node_modules` (node refuses type stripping there); releases are tag-driven — tag == package.json version == a CHANGELOG `## <version> — <title>` section, then OIDC provenance publish + GitHub release.
