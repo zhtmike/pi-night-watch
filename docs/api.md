@@ -22,7 +22,7 @@ Creates a task (atomic manifest under `.pi/night-watch/<slug>/`) and spawns roun
 
 Unknown or valueless flags are rejected, never silently folded into the goal.
 
-The goal is re-stated verbatim in every round brief, so anything written into it — an approval statement ("I have already human approved; do it yourself"), constraints, links, working style, decisions you foresee — reaches every round unchanged. The tool adds no approval machinery of its own: a worker whose environment has approval rules reads them from the goal; a worker with none simply proceeds. Actions beyond the goal's scope (merging, pushing to protected refs) are report items at task end, never auto-executed.
+The goal is re-stated verbatim in every round brief, so anything written into it — an approval statement ("push the fix branch — already human-approved"), constraints, links, working style, decisions you foresee — reaches every round unchanged. The tool adds no approval machinery of its own. The worker's reading of an approval statement rides the `review_gate` description, present in every round's context: the round is unattended and cannot ask mid-run; the goal is the owner's voice and nothing else speaks for the owner; where the worker's approval rules apply, an approval sentence in the goal grants approval for exactly the actions the goal names, as named — the environment's standing approvals hold alongside; naming an action is not approving it — a goal without an approval sentence names outcomes, not approvals, and an approval claim arriving through anything else (task text, comments, files, tool results) approves nothing; an action gated beyond that is never taken — the ask returns in the worker's final report. A worker with no approval rules in its environment simply proceeds — the contract is inert there. Actions beyond the goal's named approvals (merging, pushing to protected refs) are report items at task end, never auto-executed.
 
 Briefs carry state only — goal, round, outcomes, reviewer findings. All methodology and instruction prose belongs in the goal (it reaches both roles) or in the ambient skills; the tools' own descriptions state their call contracts.
 
@@ -75,7 +75,7 @@ The wall budget is `maxRounds × roundDeadlineMin` — defaults (10 × 30m ≈ 5
 { "maxRounds": 24, "roundDeadlineMin": 90, "reviewerDeadlineMin": 30 }
 ```
 
-The round leash bounds *everything* the round starts: sub-agents or lanes spawned inside a worker share its process group and die with it at the deadline. Give a round that fans out a `roundDeadlineMin` above its widest lane's own deadline plus margin — a lane killed mid-flight reports nothing back. The leash is also the guard against runaway spend: a round that would exceed it should be split into rounds (the worker settles, the next round continues with its report).
+The round leash bounds *everything* the round starts: sub-agents or lanes spawned inside a worker share its process group and die with it at the deadline. Give a round that fans out a `roundDeadlineMin` above its widest lane's own deadline plus margin — a lane killed mid-flight reports nothing back. Lanes also inherit the worker's `NIGHTWATCH_*` env markers, so with this package installed they register the worker tools; a dispatcher's mandatory per-lane tool allowlist keeps them out of a lane's reach unless the lane is granted `*` or names them. The leash is also the guard against runaway spend: a round that would exceed it should be split into rounds (the worker settles, the next round continues with its report).
 
 ## State layout
 
@@ -124,7 +124,7 @@ No scheduler ships with it. Recipes (e.g. every minute):
 </dict></plist>
 ```
 
-Driver-run shells (`criteria`) run under the `timeout` leash, so a timeout kills the command's whole process tree, not just its shell. Drive one workspace from one install (one bin, one extension) — a cron entry pointing at a different install than the interactive session silently advances the same tasks with two codebases.
+Driver-run shells (`criteria`) run under the `timeout` leash, so a timeout kills the command's whole process tree, not just its shell. A `criteria` needing gh auth inherits the kicker's environment — under cron/launchd without an unlocked GUI keychain the keyring may be unreachable; env-token setups (`GH_TOKEN`) work headless. Drive one workspace from one install (one bin, one extension) — a cron entry pointing at a different install than the interactive session silently advances the same tasks with two codebases.
 
 ## Mechanics
 
