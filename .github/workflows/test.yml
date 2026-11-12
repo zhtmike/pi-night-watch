@@ -45,6 +45,35 @@ jobs:
       - run: npm install --no-save --no-package-lock --ignore-scripts typescript@7.0.2 @types/node@24 @earendil-works/pi-coding-agent@1.4.0
       - run: npx tsc --noEmit
 
+  # The bin runs from node_modules, where node refuses type stripping:
+  # pack with the prepack build, install the tarball into a scratch root, run the bin.
+  # Success = the bin's own no-task failure path (exit 1, message on stderr) — the
+  # regression it guards is the import-time ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING.
+  pack-install-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: npm pack --quiet
+      - name: Install the tarball and run the bin from node_modules
+        run: |
+          set -eu
+          TARBALL="$(echo "$GITHUB_WORKSPACE"/*.tgz)"
+          ROOT="$(mktemp -d)"
+          WS="$(mktemp -d)"
+          npm install --prefix "$ROOT" --no-save --legacy-peer-deps "$TARBALL"
+          set +e
+          OUT="$("$ROOT/node_modules/.bin/night-watch" status "$WS" 2>&1)"
+          RC=$?
+          set -e
+          echo "$OUT"
+          [ "$RC" -eq 1 ]
+          echo "$OUT" | grep -q "no tasks in this workspace"
+          echo "$OUT" | grep -qv ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING
+
   # Forward canary: same typecheck but pi@latest — surfaces host drift before it
   # reaches users. Not a hard support guarantee.
   compat-latest-pi:

@@ -1,6 +1,6 @@
 {
 	"name": "@zhtmike/pi-night-watch",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"description": "Long-horizon worker/reviewer loop for the pi coding agent",
 	"author": "zhtmike",
 	"keywords": [
@@ -23,11 +23,15 @@
 		"node": ">=22.19.0"
 	},
 	"scripts": {
-		"test": "node tests/config.test.ts && node tests/layout.test.ts && node tests/manifest.test.ts && node tests/decision.test.ts && node tests/briefs.test.ts && node tests/argv.test.ts && node tests/events.test.ts && node tests/args.test.ts && node tests/driver.test.ts && node tests/kicker.test.ts"
+		"test": "node tests/config.test.ts && node tests/layout.test.ts && node tests/manifest.test.ts && node tests/decision.test.ts && node tests/briefs.test.ts && node tests/argv.test.ts && node tests/events.test.ts && node tests/args.test.ts && node tests/driver.test.ts && node tests/kicker.test.ts",
+		"build": "node --disable-warning=ExperimentalWarning scripts/build.mjs",
+		"pretest": "npm run build",
+		"prepack": "npm run build"
 	},
 	"files": [
 		"src",
 		"bin",
+		"dist",
 		"docs",
 		"CHANGELOG.md"
 	],
