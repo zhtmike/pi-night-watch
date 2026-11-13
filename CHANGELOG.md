@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.4 — child-tool descriptions drop schema-carried duplication
+
+`submit_verdict`'s description restated its three parameter schemas verbatim — the exact defect class the pi-minimal-dispatch 0.5.4 audit cut there. The description now carries only the exactly-once, final-act instruction (the reviewer brief teaches exactly-once solely on the repair path, so the description covers the normal path); the parameters carry their own semantics. The `notes` cap (≤500 chars) stays on the parameter line and must: `validateVerdictArgs` silently truncates, so no error ever teaches the cap — the parameter description is the only teacher. `review_gate` drops "Takes no arguments; the reviewer sees the goal, criteria, and prior findings itself." — the empty parameter schema carries the first half, and a worker cannot attach context to a no-argument tool.
+
+Every approval-contract sentence is byte-identical — 0.3.1's observed runs (injection probes, the negative-rule standing limit) tuned that exact wording; nothing adjacent was reworded.
+
+The riders are child sessions only — the env-gated factory registers no tools in interactive sessions — saving ~38 tokens per reviewer-attempt request and ~13 per worker-round request.
+
+**Observed run.** Free suite: 104 checks across 10 suites green (pretest build included); `tsc --noEmit` clean. Description text and package version only — no behavior change, no new tests owed (0.3.1 precedent).
+
 ## 0.3.3 — bin `start`: the agent-reachable entry
 
 Slash commands are TUI chrome — the model cannot see, invoke, or probe them — so guidance that routes agents to `/watch start` sends them searching the surfaces they can see (MCP servers, PATH subcommands, skills). All legitimately negative: an agent on a fully provisioned machine reported "no /watch tool is installed" and improvised a detached watcher lane, while `/watch` worked at the same keyboard. The bin gains `start` — the same explicit action, reachable where slash commands are not.
