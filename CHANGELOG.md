@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 — bin `start`: the agent-reachable entry
+
+Slash commands are TUI chrome — the model cannot see, invoke, or probe them — so guidance that routes agents to `/watch start` sends them searching the surfaces they can see (MCP servers, PATH subcommands, skills). All legitimately negative: an agent on a fully provisioned machine reported "no /watch tool is installed" and improvised a detached watcher lane, while `/watch` worked at the same keyboard. The bin gains `start` — the same explicit action, reachable where slash commands are not.
+
+**The change.** `night-watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] [<goal>]` arms a task in the cwd and spawns round 1. No dir positional (advance/status keep theirs), no kicker jitter — jitter exists for scheduled lockstep, and `start` is never a cron verb: a scheduled start would be auto-arm. Both entries share one tail — `startFromOpts` in driver.ts (resolve goal, create task, advance) — and `parseStartArgs` splits into `parseStartTokens` so the bin consumes argv directly; re-joining argv into a string would mangle quoted goals. `/watch start` behavior is unchanged. design.md's non-goal now reads "explicit invocation": `/watch start` typed by an owner, or `night-watch start` run by an owner or an agent acting on the owner's instruction; a config found in a cloned repo still arms nothing.
+
+**Observed runs.** Free suite: 104 checks across 10 suites; kicker gains three (start without a goal ⇒ usage exit 1; start with stub heads ⇒ `task <slug> started` + `round 1 SPAWNED`; round 1's head recorded in the manifest), args gains one (quote-bearing argv tokens survive the tokens path verbatim); `tsc --noEmit` clean. Live: the checkout bin armed `--criteria "test -f done.txt"` under a flash-pinned config — round 1 wrote `done.txt`, called the gate, reviewer PASS with byte-level evidence, criteria exit 0, `TERMINAL: DONE`. The first live attempt reproduced the 0.3.2 mixed-copy interplay (user-level install + checkout `-e` double-registers `review_gate`); an isolated `PI_CODING_AGENT_DIR` runs it clean.
+
 ## 0.3.2 — kicker bin runs from installs (compiled dist at publish)
 
 The kicker bin crashed at import wherever node resolved it under `node_modules` — node never applies runtime type stripping there, and the bin imported `src/driver.ts`, so every stock node satisfying the engines floor threw `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` on the first import. The cron/launchd surface was dead on arrival from an npm install; the in-session loop was unaffected (pi's extension loader handles the TS).

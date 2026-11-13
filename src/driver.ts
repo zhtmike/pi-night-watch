@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import { hostname } from "node:os";
 import * as path from "node:path";
-import { parseStartArgs } from "./args.ts";
+import { parseStartArgs, parseStartTokens } from "./args.ts";
 import type { StartOpts } from "./args.ts";
 import { type WatchConfig, normalizeConfig } from "./config.ts";
 import { crashOutcome, decideOutcome, lastVerdictFor, sha256, terminalFromOutcomes } from "./decision.ts";
@@ -43,7 +43,7 @@ import {
 	WatchError,
 } from "./manifest.ts";
 
-export { parseStartArgs };
+export { parseStartArgs, parseStartTokens };
 export type { StartOpts };
 
 /** Reviewer attempts per gate call: one, plus one bounded repair retry. */
@@ -122,6 +122,13 @@ export function startTask(cwd: string, goal: string, opts: { criteriaFiles?: str
 	};
 	writeManifest(manifestPath(dir), m);
 	return { dir, slug };
+}
+
+/** The shared tail of both start entries (`/watch start`, `night-watch start`): resolve the goal, create the task, spawn round 1. */
+export function startFromOpts(cwd: string, o: StartOpts, extPath: string): { lines: string[] } {
+	const goal = resolveGoal(cwd, { goal: o.goal || undefined, goalFile: o.goalFile });
+	const { slug } = startTask(cwd, goal, { criteriaFiles: o.criteriaFiles, slug: o.slug, criteria: o.criteria, reviewRubric: o.reviewRubric });
+	return { lines: [`task ${slug} started`, ...advanceTask(cwd, slug, extPath).lines] };
 }
 
 // --- goal resolution --------------------------------------------------------------------------

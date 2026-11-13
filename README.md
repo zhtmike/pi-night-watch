@@ -103,7 +103,7 @@ reference in [docs/api.md](docs/api.md):
 - **`/watch stop`** — TERM head + group, KILL after grace; terminal `STOPPED`. Nothing running (settling, or between rounds)? The stop is still recorded — a scheduled kicker can never spawn against it; only an already-determined terminal outcome outranks a stop.
 - **`review_gate`** (worker tool) — spawn the fresh-context reviewer, return its verdict.
 - **`submit_verdict`** (reviewer tool) — `passed`, `notes`, `evidence[]`. Each child role sees only its own tools.
-- **`night-watch` bin** — `advance` / `status` for cron or launchd; same lock, same write-ahead, jittered polls. Unattended rounds advance with no session open.
+- **`night-watch` bin** — `start` (the explicit-action entry for shells and agents on the owner's instruction — never a cron verb), `advance` / `status` for cron or launchd; same lock, same write-ahead, jittered polls. Unattended rounds advance with no session open.
 
 ## State model
 

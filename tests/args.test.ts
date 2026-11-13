@@ -1,5 +1,5 @@
 import { ConfigError } from "../src/config.ts";
-import { parseStartArgs, tokenize } from "../src/args.ts";
+import { parseStartArgs, parseStartTokens, tokenize } from "../src/args.ts";
 import { check, finish } from "./harness.ts";
 
 check("quoted segments preserved", JSON.stringify(tokenize('--criteria "npm test" fix the bug')) === JSON.stringify(["--criteria", "npm test", "fix", "the", "bug"]));
@@ -24,4 +24,6 @@ try {
 } catch (e) {
 	check("goal-file + inline goal rejected", e instanceof ConfigError);
 }
+const pt = parseStartTokens(["it's", "broken", "today"]);
+check("tokens path keeps quote-bearing argv verbatim", pt.goal === "it's broken today");
 finish("args");

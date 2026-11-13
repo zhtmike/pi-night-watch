@@ -12,7 +12,7 @@ The inspector: full status (config, rounds, verdict chain, terminal) plus the li
 
 ### `/watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] [<goal>]`
 
-Creates a task (atomic manifest under `.pi/night-watch/<slug>/`) and spawns round 1. Flags:
+Creates a task (atomic manifest under `.pi/night-watch/<slug>/`) and spawns round 1. The same start is reachable as `night-watch start` ([Kicker bin](#kicker-bin)) — the entry for shells and agents acting on the owner's instruction, where slash commands cannot go. Flags:
 
 - `--criteria "cmd"` — shell command the driver runs; a round passes only if it exits 0. Quoted segments are preserved (`--criteria "npm test && npm run lint"`).
 - `--criteria-files a,b` — files whose hashes are pinned at start; a worker edit to them fails the round as tampering. An accidental-edit guard, not a security boundary.
@@ -101,7 +101,7 @@ Terminal states: `DONE` (first PASS wins), `HALT_STAGNANT` (identical failure si
 
 ## Kicker bin
 
-`night-watch advance [dir] [slug]` · `night-watch status [dir] [slug]` — a plain-node bin shipped with the package (`node_modules/.bin/night-watch` when installed). `dir` defaults to the cwd, `slug` to the latest task by mtime. Each invocation is stateless — the same single-flight lock and write-ahead as `/watch advance`; a missed schedule collapses into one catch-up advance. `advance` sleeps a random `0..pollJitterMs` first so machines do not poll in lockstep.
+`night-watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] [<goal>]` · `night-watch advance [dir] [slug]` · `night-watch status [dir] [slug]` — a plain-node bin shipped with the package (`node_modules/.bin/night-watch` when installed). `start` arms a task in the cwd and spawns round 1 — the explicit action beside `/watch start`, reachable where slash commands are not (a shell, an agent executing the owner's instruction); it is never a cron verb, because a scheduled start would be auto-arm. `dir` defaults to the cwd, `slug` to the latest task by mtime. Each kicker invocation is stateless — the same single-flight lock and write-ahead as `/watch advance`; a missed schedule collapses into one catch-up advance. `advance` sleeps a random `0..pollJitterMs` first so machines do not poll in lockstep.
 
 No scheduler ships with it. Recipes (e.g. every minute):
 

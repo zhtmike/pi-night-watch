@@ -16,7 +16,7 @@ pi sessions and their dispatch lanes are fire-and-forget: a lane takes a brief, 
 
 ## Non-goals
 
-No daemon or authoritative process. No auto-merge: terminal state is DONE → human review; the loop never merges or pushes to protected refs. Not a sandbox or a defense against a hostile worker. No webhook/network listener; unattended progress is the stateless kicker bin — a missed schedule collapses into one catch-up advance. No decision authority, parked waits, or terminal-event hooks — the worker decides and reports, an external condition is ordinary rejected-verdict state, and a cron wrapper sees every terminal line the kicker prints. No queue, fleet, or personas — two prompts, worker and reviewer. No auto-arm from cloned repos: tasks start only by explicit local action. POSIX only (process groups, `ps -o lstart=`, GNU `timeout`).
+No daemon or authoritative process. No auto-merge: terminal state is DONE → human review; the loop never merges or pushes to protected refs. Not a sandbox or a defense against a hostile worker. No webhook/network listener; unattended progress is the stateless kicker bin — a missed schedule collapses into one catch-up advance. No decision authority, parked waits, or terminal-event hooks — the worker decides and reports, an external condition is ordinary rejected-verdict state, and a cron wrapper sees every terminal line the kicker prints. No queue, fleet, or personas — two prompts, worker and reviewer. No auto-arm from cloned repos: tasks start only by explicit invocation — `/watch start` typed by an owner, or `night-watch start` run by an owner or an agent acting on the owner's instruction; a config found in a cloned repo arms nothing. POSIX only (process groups, `ps -o lstart=`, GNU `timeout`).
 
 ## Failure-mode matrix
 
