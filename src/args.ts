@@ -40,10 +40,8 @@ export function tokenize(s: string): string[] {
 	return out;
 }
 
-/** `/watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] <goal…>`
- * Inline goals are whitespace-flattened to one line; `--goal-file` carries a file verbatim. */
-export function parseStartArgs(args: string): StartOpts {
-	const tokens = tokenize(args);
+/** Parse pre-tokenized start arguments (CLI argv); unknown or valueless flags rejected loudly. */
+export function parseStartTokens(tokens: string[]): StartOpts {
 	const out: StartOpts = { goal: "" };
 	const rest: string[] = [];
 	for (let i = 0; i < tokens.length; i++) {
@@ -65,4 +63,10 @@ export function parseStartArgs(args: string): StartOpts {
 	if (out.goalFile !== undefined && rest.length > 0) throw new ConfigError("inline goal and --goal-file are mutually exclusive");
 	out.goal = rest.join(" ");
 	return out;
+}
+
+/** `/watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] <goal…>`
+ * Inline goals are whitespace-flattened to one line; `--goal-file` carries a file verbatim. */
+export function parseStartArgs(args: string): StartOpts {
+	return parseStartTokens(tokenize(args));
 }

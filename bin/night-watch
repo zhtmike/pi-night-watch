@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 /**
- * Stateless kicker for night-watch tasks: `advance [dir] [slug]` | `status [dir] [slug]`.
- * Meant for cron/launchd — no session, no daemon; each invocation takes the same
- * single-flight lock as `/watch advance`. advance sleeps a random 0..pollJitterMs
- * first so machines do not poll in lockstep.
+ * night-watch CLI: `start [--criteria cmd] [--criteria-files a,b] [--slug s]
+ * [--review rubric] [--goal-file path] [<goal>]` arms a task in the cwd — the
+ * explicit action, run by an owner or an agent on the owner's instruction;
+ * never a cron verb. `advance [dir] [slug]` | `status [dir] [slug]` are the
+ * stateless kicker verbs for cron/launchd — no session, no daemon; each
+ * invocation takes the same single-flight lock as `/watch advance`, and
+ * advance sleeps a random 0..pollJitterMs first so machines do not poll in
+ * lockstep.
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { advanceTask, latestSlug, readConfig, statusText } from "../dist/driver.js";
+import { advanceTask, latestSlug, parseStartTokens, readConfig, startFromOpts, statusText } from "../dist/driver.js";
 
-const USAGE = "usage: night-watch advance [dir] [slug] | night-watch status [dir] [slug]  (dir defaults to cwd, slug to the latest task)";
+const USAGE = "usage: night-watch start [--criteria cmd] [--criteria-files a,b] [--slug s] [--review rubric] [--goal-file path] [<goal>] | night-watch advance [dir] [slug] | night-watch status [dir] [slug]  (start runs in the cwd; advance/status dir defaults to cwd, slug to the latest task)";
 
 function fail(msg) {
 	process.stderr.write(`night-watch: ${msg}\n`);
@@ -27,10 +31,17 @@ function extPath() {
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
-if (cmd !== "advance" && cmd !== "status") fail(USAGE);
-const dir = argv[1] ? path.resolve(argv[1]) : process.cwd();
+if (cmd !== "start" && cmd !== "advance" && cmd !== "status") fail(USAGE);
 
 try {
+	if (cmd === "start") {
+		const o = parseStartTokens(argv.slice(1));
+		if (!o.goal && !o.goalFile) fail(USAGE);
+		process.stdout.write(startFromOpts(process.cwd(), o, extPath()).lines.join("\n") + "\n");
+		process.exit(0);
+	}
+	const dir = argv[1] ? path.resolve(argv[1]) : process.cwd();
+
 	if (cmd === "status") {
 		const slug = argv[2] ?? latestSlug(dir);
 		process.stdout.write(statusText(dir, slug) + "\n");

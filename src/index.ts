@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { defineTool, type AgentToolResult, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { validateVerdictArgs } from "./events.ts";
-import { advanceTask, latestSlug, overlayText, parseStartArgs, resolveGoal, runReviewGate, startTask, statusLine, statusText, stopTask } from "./driver.ts";
+import { advanceTask, latestSlug, overlayText, parseStartArgs, runReviewGate, startFromOpts, statusLine, statusText, stopTask } from "./driver.ts";
 
 const EXT_PATH = fileURLToPath(import.meta.url);
 const text = (s: string): AgentToolResult => ({ content: [{ type: "text", text: s }], details: {} });
@@ -136,10 +136,7 @@ export default function (pi: ExtensionAPI) {
 						ctx.ui.notify(USAGE, "warning");
 						return;
 					}
-					const goal = resolveGoal(ctx.cwd, { goal: o.goal || undefined, goalFile: o.goalFile });
-					const { slug } = startTask(ctx.cwd, goal, { criteriaFiles: o.criteriaFiles, slug: o.slug, criteria: o.criteria, reviewRubric: o.reviewRubric });
-					const rep = advanceTask(ctx.cwd, slug, EXT_PATH);
-					ctx.ui.notify([`task ${slug} started`, ...rep.lines].join("\n"), "info");
+					ctx.ui.notify(startFromOpts(ctx.cwd, o, EXT_PATH).lines.join("\n"), "info");
 				} else if (cmd === "status") {
 					const t = statusText(ctx.cwd, slugArg ?? latestSlug(ctx.cwd));
 					ctx.ui.notify(t, "info");
