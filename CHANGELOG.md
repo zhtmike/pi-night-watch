@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5 — the usage failure teaches the goal contract
+
+The bin is the agent-reachable entry (0.3.3), but its usage failure taught syntax only — a session told to run a watch composed the goal blind to the approval contract, which reached composers solely through host-side guidance. The usage failure — a bare invocation or a goal-less `start` — now carries the goal contract beside the syntax: the goal is the owner's voice in every round; carry an approval sentence covering exactly the actions the goal names; approvals cannot reach an unattended round mid-run, and actions gated beyond that return as report items. The contract stays general — no enumeration of gated actions; the environment's approval rules name their own gates.
+
+**Observed run.** Free suite: 104 checks across 10 suites green (pretest build included); `tsc --noEmit` clean; the checkout bin's bare run prints the two-line failure, exit 1. Bin text and two extended kicker assertions — no behavior change beyond the failure output.
+
 ## 0.3.4 — child-tool descriptions drop schema-carried duplication
 
 `submit_verdict`'s description restated its three parameter schemas verbatim — the exact defect class the pi-minimal-dispatch 0.5.4 audit cut there. The description now carries only the exactly-once, final-act instruction (the reviewer brief teaches exactly-once solely on the repair path, so the description covers the normal path); the parameters carry their own semantics. The `notes` cap (≤500 chars) stays on the parameter line and must: `validateVerdictArgs` silently truncates, so no error ever teaches the cap — the parameter description is the only teacher. `review_gate` drops "Takes no arguments; the reviewer sees the goal, criteria, and prior findings itself." — the empty parameter schema carries the first half, and a worker cannot attach context to a no-argument tool.

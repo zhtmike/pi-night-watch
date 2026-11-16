@@ -37,7 +37,7 @@ function settledTask(goal: string): { dir: string; slug: string } {
 const first = settledTask("kicker advances unattended");
 
 const bad = run([]);
-check("no subcommand ⇒ usage, exit 1", bad.status === 1 && bad.stderr.includes("usage"));
+check("no subcommand ⇒ usage + goal note, exit 1", bad.status === 1 && bad.stderr.includes("usage") && bad.stderr.includes("approval sentence"));
 
 const st = run(["status", root, first.slug]);
 check("status renders settling round + verdict chain", st.status === 0 && st.stdout.includes("round 1: settling") && st.stdout.includes("verdict r1: PASS"));
@@ -69,7 +69,7 @@ fs.chmodSync(stubBin, 0o755);
 fs.writeFileSync(path.join(startRoot, ".pi", "night-watch", "config.json"), JSON.stringify({ piBin: stubBin, timeoutBin: stubBin, pollJitterMs: 1 }));
 
 const noGoal = run(["start"], { cwd: startRoot });
-check("start without a goal ⇒ usage, exit 1", noGoal.status === 1 && noGoal.stderr.includes("usage"));
+check("start without a goal ⇒ usage + goal note, exit 1", noGoal.status === 1 && noGoal.stderr.includes("usage") && noGoal.stderr.includes("approval sentence"));
 
 const started = run(["start", "--criteria", "true", "make it green"], { cwd: startRoot });
 const armed = started.status === 0 && started.stdout.includes("task make-it-green started") && started.stdout.includes("round 1 SPAWNED");
