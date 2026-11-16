@@ -22,6 +22,14 @@ function fail(msg) {
 	process.exit(1);
 }
 
+// The usage failure is the one output a goal composer is guaranteed to read — the goal contract rides it.
+function failUsage() {
+	process.stderr.write(
+		`night-watch: ${USAGE}\nthe goal is the owner's voice in every round — carry an approval sentence covering exactly the actions the goal names; approvals cannot reach an unattended round mid-run, and actions gated beyond that return as report items\n`,
+	);
+	process.exit(1);
+}
+
 /** The shipped extension worker children `-e`: resolved from this bin's installed location. */
 function extPath() {
 	const p = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "index.ts");
@@ -31,12 +39,12 @@ function extPath() {
 
 const argv = process.argv.slice(2);
 const cmd = argv[0];
-if (cmd !== "start" && cmd !== "advance" && cmd !== "status") fail(USAGE);
+if (cmd !== "start" && cmd !== "advance" && cmd !== "status") failUsage();
 
 try {
 	if (cmd === "start") {
 		const o = parseStartTokens(argv.slice(1));
-		if (!o.goal && !o.goalFile) fail(USAGE);
+		if (!o.goal && !o.goalFile) failUsage();
 		process.stdout.write(startFromOpts(process.cwd(), o, extPath()).lines.join("\n") + "\n");
 		process.exit(0);
 	}
